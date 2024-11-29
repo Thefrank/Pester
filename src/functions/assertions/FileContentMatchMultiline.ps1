@@ -1,4 +1,4 @@
-﻿function Should-FileContentMatchMultiline($ActualValue, $ExpectedContent, [switch] $Negate, [String] $Because) {
+﻿function Should-FileContentMatchMultilineAssertion($ActualValue, $ExpectedContent, [switch] $Negate, [String] $Because) {
     <#
     .SYNOPSIS
     As opposed to FileContentMatch and FileContentMatchExactly operators,
@@ -34,18 +34,25 @@
 
     $failureMessage = ''
 
-    if (-not $succeeded) {
-        if ($Negate) {
-            $failureMessage = NotShouldFileContentMatchMultilineFailureMessage -ActualValue $ActualValue -ExpectedContent $ExpectedContent -Because $Because
-        }
-        else {
-            $failureMessage = ShouldFileContentMatchMultilineFailureMessage -ActualValue $ActualValue -ExpectedContent $ExpectedContent -Because $Because
-        }
+    if ($true -eq $succeeded) { return [Pester.ShouldResult]@{Succeeded = $succeeded } }
+
+    if ($Negate) {
+        $failureMessage = NotShouldFileContentMatchMultilineFailureMessage -ActualValue $ActualValue -ExpectedContent $ExpectedContent -Because $Because
+    }
+    else {
+        $failureMessage = ShouldFileContentMatchMultilineFailureMessage -ActualValue $ActualValue -ExpectedContent $ExpectedContent -Because $Because
     }
 
-    return [PSCustomObject] @{
+    $ExpectedValue = $ExpectedContent
+
+    return [Pester.ShouldResult] @{
         Succeeded      = $succeeded
         FailureMessage = $failureMessage
+        ExpectResult   = @{
+            Actual   = Format-Nicely $ActualValue
+            Expected = Format-Nicely $ExpectedValue
+            Because  = $Because
+        }
     }
 }
 
@@ -58,8 +65,8 @@ function NotShouldFileContentMatchMultilineFailureMessage($ActualValue, $Expecte
 }
 
 & $script:SafeCommands['Add-ShouldOperator'] -Name FileContentMatchMultiline `
-    -InternalName Should-FileContentMatchMultiline `
-    -Test         ${function:Should-FileContentMatchMultiline}
+    -InternalName Should-FileContentMatchMultilineAssertion `
+    -Test         ${function:Should-FileContentMatchMultilineAssertion}
 
 Set-ShouldOperatorHelpMessage -OperatorName FileContentMatchMultiline `
-    -HelpMessage 'As opposed to FileContentMatch and FileContentMatchExactly operators, FileContentMatchMultiline presents content of the file being tested as one string object, so that the expression you are comparing it to can consist of several lines.'
+    -HelpMessage "As opposed to FileContentMatch and FileContentMatchExactly operators, FileContentMatchMultiline presents content of the file being tested as one string object, so that the expression you are comparing it to can consist of several lines.`n`nWhen using FileContentMatchMultiline operator, '^' and '$' represent the beginning and end of the whole file, instead of the beginning and end of a line"

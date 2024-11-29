@@ -1,6 +1,8 @@
 ﻿# NUnit3 schema docs: https://docs.nunit.org/articles/nunit/technical-notes/usage/Test-Result-XML-Format.html
 
-function Write-NUnit3Report($Result, [System.Xml.XmlWriter] $XmlWriter) {
+[char[]] $script:invalidCDataChars = foreach ($ch in (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0C, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F)) { [char]$ch }
+
+function Write-NUnit3Report([Pester.Run] $Result, [System.Xml.XmlWriter] $XmlWriter) {
     # Write the XML Declaration
     $XmlWriter.WriteStartDocument($false)
 
@@ -19,8 +21,8 @@ function Write-NUnit3Report($Result, [System.Xml.XmlWriter] $XmlWriter) {
 }
 
 function Write-NUnit3TestRunAttributes {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns','')]
-    param($Result, [System.Xml.XmlWriter] $XmlWriter)
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
+    param([Pester.Run] $Result, [System.Xml.XmlWriter] $XmlWriter)
 
     $XmlWriter.WriteAttributeString('id', '0')
     $XmlWriter.WriteAttributeString('name', $Result.Configuration.TestResult.TestSuiteName.Value) # required attr. in schema, but not in docs or nunit-console output...
@@ -30,7 +32,7 @@ function Write-NUnit3TestRunAttributes {
     $XmlWriter.WriteAttributeString('total', ($Result.TotalCount - $Result.NotRunCount)) # testcasecount - filtered
     $XmlWriter.WriteAttributeString('passed', $Result.PassedCount)
     $XmlWriter.WriteAttributeString('failed', $Result.FailedCount)
-    $XmlWriter.WriteAttributeString('inconclusive', '0') # required attr. $Result.PendingCount + $Result.InconclusiveCount when/if implemented?
+    $XmlWriter.WriteAttributeString('inconclusive', $Result.InconclusiveCount)
     $XmlWriter.WriteAttributeString('skipped', $Result.SkippedCount)
     $XmlWriter.WriteAttributeString('warnings', '0') # required attr.
     $XmlWriter.WriteAttributeString('start-time', (Get-UTCTimeString $Result.ExecutedAt))
@@ -42,7 +44,7 @@ function Write-NUnit3TestRunAttributes {
 
 function Write-NUnit3TestRunChildNode {
     param(
-        $Result,
+        [Pester.Run] $Result,
         [System.Xml.XmlWriter] $XmlWriter
     )
 
@@ -132,14 +134,12 @@ function Write-NUnit3TestSuiteElement {
     }
 
     $blockGroups = @(
-        # Blocks only have Id if parameterized (using -ForEach). All other blocks are put in group with '' value
-        $Node.Blocks | & $SafeCommands['Group-Object'] -Property Id
+        # Blocks only have GroupId if parameterized (using -ForEach). All other blocks are put in group with '' value
+        $Node.Blocks | & $SafeCommands['Group-Object'] -Property GroupId
     )
 
     foreach ($group in $blockGroups) {
-        # TODO: Switch Id to GroupId or something more explicit for identifying data-generated blocks (and tests).
-        # Couldn't use Where-Object Data | Group Name instead of Id because duplicate block and test names are allowed.
-        # When group has name it belongs into a block group (data-generated using -ForEach) so we want extra level of nesting for them
+        # When group has name it is a parameterized block (data-generated using -ForEach) so we want extra level of nesting for them
         $blockGroupId = $group.Name
         if ($blockGroupId) {
             if (@($group.Group.ShouldRun) -notcontains $true) {
@@ -169,14 +169,12 @@ function Write-NUnit3TestSuiteElement {
     }
 
     $testGroups = @(
-        # Tests only have Id if parameterized. All other tests are put in group with '' value
-        $Node.Tests | & $SafeCommands['Group-Object'] -Property Id
+        # Tests only have GroupId if parameterized. All other tests are put in group with '' value
+        $Node.Tests | & $SafeCommands['Group-Object'] -Property GroupId
     )
 
     foreach ($group in $testGroups) {
-        # TODO: when suite has name it belongs into a test group (test cases that are generated from the same test,
-        # based on the provided data) so we want extra level of nesting for them, right now this is encoded as having an Id that is non empty,
-        # but this is not ideal, it would be nicer to make it more explicit
+        # When group has name it is a parameterized tests (data-generated using -ForEach/TestCases) so we want extra level of nesting for them
         $testGroupId = $group.Name
         if ($testGroupId) {
             if (@($group.Group.ShouldRun) -notcontains $true) {
@@ -234,21 +232,12 @@ function Get-NUnit3TestSuiteInfo {
     }
 
     if ($TestSuite -is [Pester.Container]) {
-        switch ($TestSuite.Type) {
-            'File' {
-                $name = $TestSuite.Item.Name
-                $fullname = $TestSuite.Item.FullName
-                break
-            }
-            'ScriptBlock' {
-                $name = $TestSuite.Item.Id.Guid
-                $fullname = "<ScriptBlock>$($TestSuite.Item.File):$($TestSuite.Item.StartPosition.StartLine)"
-                break
-            }
-            default {
-                throw "Container type '$($TestSuite.Type)' is not supported."
-            }
+        $name = switch ($TestSuite.Type) {
+            'File' { $TestSuite.Item.Name; break }
+            'ScriptBlock' { $TestSuite.Item.Id.Guid; break }
+            default { throw "Container type '$($TestSuite.Type)' is not supported." }
         }
+        $fullname = $TestSuite.Name
         $classname = ''
     }
     else {
@@ -297,6 +286,7 @@ function Get-NUnit3TestSuiteInfo {
         passed        = $TestSuite.PassedCount
         failed        = $TestSuite.FailedCount
         skipped       = $TestSuite.SkippedCount
+        inconclusive  = $TestSuite.InconclusiveCount
         site          = $site
         shouldrun     = $TestSuite.ShouldRun
     }
@@ -305,14 +295,14 @@ function Get-NUnit3TestSuiteInfo {
 }
 
 function Write-NUnit3TestSuiteAttributes {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns','')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     param($TestSuiteInfo, [System.Xml.XmlWriter] $XmlWriter)
 
     $XmlWriter.WriteAttributeString('type', $TestSuiteInfo.type)
     $XmlWriter.WriteAttributeString('id', (Get-NUnit3NodeId))
     $XmlWriter.WriteAttributeString('name', $TestSuiteInfo.name)
     $XmlWriter.WriteAttributeString('fullname', $TestSuiteInfo.fullname)
-    if ($TestSuiteInfo.type -in 'TestFixture','ParameterizedMethod') {
+    if ($TestSuiteInfo.type -in 'TestFixture', 'ParameterizedMethod') {
         $XmlWriter.WriteAttributeString('classname', $TestSuiteInfo.classname)
     }
     $XmlWriter.WriteAttributeString('runstate', $TestSuiteInfo.runstate)
@@ -327,7 +317,7 @@ function Write-NUnit3TestSuiteAttributes {
     $XmlWriter.WriteAttributeString('total', $TestSuiteInfo.total)
     $XmlWriter.WriteAttributeString('passed', $TestSuiteInfo.passed)
     $XmlWriter.WriteAttributeString('failed', $TestSuiteInfo.failed)
-    $XmlWriter.WriteAttributeString('inconclusive', '0') # required attribute
+    $XmlWriter.WriteAttributeString('inconclusive', $TestSuiteInfo.inconclusive) # required attribute
     $XmlWriter.WriteAttributeString('warnings', '0') # required attribute
     $XmlWriter.WriteAttributeString('skipped', $TestSuiteInfo.skipped)
     $XmlWriter.WriteAttributeString('asserts', $TestSuiteInfo.testcasecount) # required attr. hardcode  1:1 per testcase
@@ -344,8 +334,11 @@ function Get-NUnit3Result ($InputObject) {
     elseif ($InputObject.SkippedCount -gt 0) {
         'Skipped'
     }
-    else {
+    elseif ($InputObject.PassedCount -gt 0) {
         'Passed'
+    }
+    else {
+        'Inconclusive'
     }
 }
 
@@ -383,28 +376,26 @@ function Get-NUnit3ParameterizedMethodSuiteInfo {
     param([Microsoft.PowerShell.Commands.GroupInfo] $TestSuiteGroup, [string] $ParentPath)
     # this is generating info for a group of tests that were generated from the same test when TestCases are used
 
-    # Using the Name from the first test as the name of the test group, even though we are grouping at
-    # the Id of the test (which is the line where the ScriptBlock of that test starts). This allows us to have
-    # unique Id (the line number) and also a readable name
-    # the possible edgecase here is putting $(Get-Date) into the test name, which would prevent us from
-    # grouping the tests together if we used just the name, and not the linenumber (which remains static)
+    # Using the Name from the first test as the name of the test group to make it readable,
+    # even though we are grouping using GroupId of the tests.
 
     $sampleTest = $TestSuiteGroup.Group[0]
     $node = [PSCustomObject] @{
-        Name          = $sampleTest.Name
-        ExpandedName  = $sampleTest.Name
-        Path          = $sampleTest.Block.Path # used for classname -> block path
-        Data          = $null
-        TotalCount    = 0
-        Duration      = [timespan]0
-        ExecutedAt    = [datetime]::MinValue
-        PassedCount   = 0
-        FailedCount   = 0
-        SkippedCount  = 0
-        NotRunCount   = 0
-        OwnTotalCount = 0
-        ShouldRun     = $true
-        Skip          = $sampleTest.Skip
+        Name              = $sampleTest.Name
+        ExpandedName      = $sampleTest.Name
+        Path              = $sampleTest.Block.Path # used for classname -> block path
+        Data              = $null
+        TotalCount        = 0
+        Duration          = [timespan]0
+        ExecutedAt        = [datetime]::MinValue
+        PassedCount       = 0
+        FailedCount       = 0
+        SkippedCount      = 0
+        InconclusiveCount = 0
+        NotRunCount       = 0
+        OwnTotalCount     = 0
+        ShouldRun         = $true
+        Skip              = $sampleTest.Skip
     }
 
     foreach ($testCase in $TestSuiteGroup.Group) {
@@ -417,6 +408,7 @@ function Get-NUnit3ParameterizedMethodSuiteInfo {
             Passed { $node.PassedCount++; break; }
             Failed { $node.FailedCount++; break; }
             Skipped { $node.SkippedCount++; break; }
+            Inconclusive { $node.InconclusiveCount++; break; }
             NotRun { $node.NotRunCount++; break; }
         }
 
@@ -430,28 +422,26 @@ function Get-NUnit3ParameterizedFixtureSuiteInfo {
     param([Microsoft.PowerShell.Commands.GroupInfo] $TestSuiteGroup, [string] $ParentPath)
     # this is generating info for a group of blocks that were generated from the same block when ForEach are used
 
-    # Using the Name from the first block as the name of the block group, even though we are grouping at
-    # the Id of the block (which is the line where the ScriptBlock of that block starts). This allows us to have
-    # unique Id (the line number) and also a readable name
-    # the possible edgecase here is putting $(Get-Date) into the block name, which would prevent us from
-    # grouping the blocks together if we used just the name, and not the linenumber (which remains static)
+    # Using the Name from the first block as the name of the block group to make it readable,
+    # even though we are grouping using GroupId of the blocks.
 
     $sampleBlock = $TestSuiteGroup.Group[0]
     $node = [PSCustomObject] @{
-        Name          = $sampleBlock.Name
-        ExpandedName  = $sampleBlock.Name
-        Path          = $sampleBlock.Path
-        Data          = $null
-        TotalCount    = 0
-        Duration      = [timespan]0
-        ExecutedAt    = [datetime]::MinValue
-        PassedCount   = 0
-        FailedCount   = 0
-        SkippedCount  = 0
-        NotRunCount   = 0
-        OwnTotalCount = 0
-        ShouldRun     = $true
-        Skip          = $false # ParameterizedFixture are always Runnable, even with -Skip
+        Name              = $sampleBlock.Name
+        ExpandedName      = $sampleBlock.Name
+        Path              = $sampleBlock.Path
+        Data              = $null
+        TotalCount        = 0
+        Duration          = [timespan]0
+        ExecutedAt        = [datetime]::MinValue
+        PassedCount       = 0
+        FailedCount       = 0
+        SkippedCount      = 0
+        InconclusiveCount = 0
+        NotRunCount       = 0
+        OwnTotalCount     = 0
+        ShouldRun         = $true
+        Skip              = $false # ParameterizedFixture are always Runnable, even with -Skip
     }
 
     foreach ($block in $TestSuiteGroup.Group) {
@@ -463,6 +453,7 @@ function Get-NUnit3ParameterizedFixtureSuiteInfo {
         $node.PassedCount += $block.PassedCount
         $node.FailedCount += $block.FailedCount
         $node.SkippedCount += $block.SkippedCount
+        $node.InconclusiveCount += $block.InconclusiveCount
         $node.NotRunCount += $block.NotRunCount
         $node.TotalCount += $block.TotalCount
 
@@ -479,8 +470,8 @@ function Write-NUnit3TestCaseElement {
 
     Write-NUnit3TestCaseAttributes -TestResult $TestResult -ParentPath $ParentPath -XmlWriter $XmlWriter
 
-    # tests with testcases/foreach (has .Id) has tags on ParameterizedMethod-node
-    $includeTags = (-not $TestResult.Id) -and $TestResult.Tag
+    # Tests with testcases/foreach (has .GroupId) has tags on ParameterizedMethod-node
+    $includeTags = (-not $TestResult.GroupId) -and $TestResult.Tag
     $hasData = $TestResult.Data -is [System.Collections.IDictionary] -and $TestResult.Data.Keys.Count -gt 0
 
     if ($includeTags -or $hasData) {
@@ -492,7 +483,6 @@ function Write-NUnit3TestCaseElement {
 
     switch ($TestResult.Result) {
         Skipped { Write-NUnitReasonElement -TestResult $TestResult -XmlWriter $XmlWriter; break }
-        Pending { Write-NUnitReasonElement -TestResult $TestResult -XmlWriter $XmlWriter; break }
         Inconclusive { Write-NUnitReasonElement -TestResult $TestResult -XmlWriter $XmlWriter; break }
         Failed { Write-NUnit3FailureElement -TestResult $TestResult -XmlWriter $XmlWriter; break }
     }
@@ -505,7 +495,7 @@ function Write-NUnit3TestCaseElement {
 }
 
 function Write-NUnit3TestCaseAttributes {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns','')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     param($TestResult, [string] $ParentPath, [System.Xml.XmlWriter] $XmlWriter)
 
     # add parameters to name for testcase with data when not using variables in name
@@ -533,7 +523,6 @@ function Write-NUnit3TestCaseAttributes {
         Failed { $XmlWriter.WriteAttributeString('result', 'Failed'); break }
         Passed { $XmlWriter.WriteAttributeString('result', 'Passed'); break }
         Skipped { $XmlWriter.WriteAttributeString('result', 'Skipped'); break }
-        Pending { $XmlWriter.WriteAttributeString('result', 'Inconclusive'); break }
         Inconclusive { $XmlWriter.WriteAttributeString('result', 'Inconclusive'); break }
         # result-attribute is required, so intentionally making xml invalid if unknown state occurs
     }
@@ -550,8 +539,39 @@ function Write-NUnit3TestCaseAttributes {
 }
 
 function Write-NUnit3OutputElement ($Output, [System.Xml.XmlWriter] $XmlWriter) {
-    $outputString = @(foreach ($o in $Output) { $o.ToString() }) -join [System.Environment]::NewLine
+    # The characters in the range 0x01 to 0x20 are invalid for CData
+    # (with the exception of the characters 0x09, 0x0A and 0x0D)
+    # We convert each of these using the unicode printable version,
+    # which is obtained by adding 0x2400
+    [int]$unicodeControlPictures = 0x2400
 
+    # Avoid indexing into an enumerable, such as a `string`, when there is only one item in the
+    # output array.
+    $out = @($Output)
+    $linesCount = $out.Length
+    $o = for ($i = 0; $i -lt $linesCount; $i++) {
+        # The input is array of objects, convert them to strings.
+        $line = if ($null -eq $out[$i]) { [String]::Empty } else { $out[$i].ToString() }
+
+        if (0 -gt $line.IndexOfAny($script:invalidCDataChars)) {
+            # No special chars that need replacing.
+            $line
+        }
+        else {
+            $chars = [char[]]$line;
+            $charCount = $chars.Length
+            for ($j = 0; $j -lt $charCount; $j++) {
+                $char = $chars[$j]
+                if ($char -in $script:invalidCDataChars) {
+                    $chars[$j] = [char]([int]$char + $unicodeControlPictures)
+                }
+            }
+
+            $chars -join ''
+        }
+    }
+
+    $outputString = $o -join [Environment]::NewLine
     $XmlWriter.WriteStartElement('output')
     $XmlWriter.WriteCData($outputString)
     $XmlWriter.WriteEndElement()
@@ -577,7 +597,7 @@ function Write-NUnit3FailureElement ($TestResult, [System.Xml.XmlWriter] $XmlWri
     $XmlWriter.WriteEndElement() # Close failure
 }
 
-function Write-NUnitReasonElement ($TestResult,[System.Xml.XmlWriter] $XmlWriter) {
+function Write-NUnitReasonElement ($TestResult, [System.Xml.XmlWriter] $XmlWriter) {
     # TODO: do not format the errors here, instead format them in the core using some unified function so we get the same thing on the screen and in nunit
 
     $result = Get-ErrorForXmlReport -TestResult $TestResult

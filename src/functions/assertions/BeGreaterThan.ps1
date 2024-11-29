@@ -1,4 +1,4 @@
-﻿function Should-BeGreaterThan($ActualValue, $ExpectedValue, [switch] $Negate, [string] $Because) {
+﻿function Should-BeGreaterThanAssertion($ActualValue, $ExpectedValue, [switch] $Negate, [string] $Because) {
     <#
     .SYNOPSIS
     Asserts that a number (or other comparable value) is greater than an expected value.
@@ -14,13 +14,18 @@
     }
 
     if ($ActualValue -le $ExpectedValue) {
-        return [PSCustomObject] @{
+        return [Pester.ShouldResult] @{
             Succeeded      = $false
             FailureMessage = "Expected the actual value to be greater than $(Format-Nicely $ExpectedValue),$(Format-Because $Because) but got $(Format-Nicely $ActualValue)."
+            ExpectResult   = @{
+                Actual   = Format-Nicely $ActualValue
+                Expected = Format-Nicely $ExpectedValue
+                Because  = $Because
+            }
         }
     }
 
-    return [PSCustomObject] @{
+    return [Pester.ShouldResult] @{
         Succeeded = $true
     }
 }
@@ -43,24 +48,29 @@ function Should-BeLessOrEqual($ActualValue, $ExpectedValue, [switch] $Negate, [s
     This test also passes, as PowerShell evaluates `10 -le 10` as true.
     #>
     if ($Negate) {
-        return Should-BeGreaterThan -ActualValue $ActualValue -ExpectedValue $ExpectedValue -Negate:$false -Because $Because
+        return Should-BeGreaterThanAssertion -ActualValue $ActualValue -ExpectedValue $ExpectedValue -Negate:$false -Because $Because
     }
 
     if ($ActualValue -gt $ExpectedValue) {
-        return [PSCustomObject] @{
+        return [Pester.ShouldResult] @{
             Succeeded      = $false
             FailureMessage = "Expected the actual value to be less than or equal to $(Format-Nicely $ExpectedValue),$(Format-Because $Because) but got $(Format-Nicely $ActualValue)."
+            ExpectResult   = @{
+                Actual   = Format-Nicely $ActualValue
+                Expected = Format-Nicely $ExpectedValue
+                Because  = $Because
+            }
         }
     }
 
-    return [PSCustomObject] @{
+    return [Pester.ShouldResult] @{
         Succeeded = $true
     }
 }
 
 & $script:SafeCommands['Add-ShouldOperator'] -Name BeGreaterThan `
-    -InternalName Should-BeGreaterThan `
-    -Test         ${function:Should-BeGreaterThan} `
+    -InternalName Should-BeGreaterThanAssertion `
+    -Test         ${function:Should-BeGreaterThanAssertion} `
     -Alias        'GT'
 
 Set-ShouldOperatorHelpMessage -OperatorName BeGreaterThan `

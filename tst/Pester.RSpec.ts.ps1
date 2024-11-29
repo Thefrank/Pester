@@ -1,6 +1,6 @@
 ﻿param ([switch] $PassThru, [switch] $NoBuild)
 
-Get-Module Pester.Runtime, Pester.Utility, P, Pester, Axiom, Stack | Remove-Module
+Get-Module P, PTestHelpers, Pester, Axiom | Remove-Module
 
 Import-Module $PSScriptRoot\p.psm1 -DisableNameChecking
 Import-Module $PSScriptRoot\axiom\Axiom.psm1 -DisableNameChecking
@@ -1668,6 +1668,12 @@ i -PassThru:$PassThru {
                 }
             }
         }
+
+        t "Does not accept unbound scriptblocks" {
+            # Would execute in Pester's internal module state
+            $ex = { New-PesterContainer -ScriptBlock ([ScriptBlock]::Create('$true')) } | Verify-Throw
+            $ex.Exception.Message | Verify-Like 'Unbound scriptblock*'
+        }
     }
 
     b "BeforeDiscovery" {
@@ -1691,23 +1697,19 @@ i -PassThru:$PassThru {
             $r.Containers[0].Blocks[0].Tests[0].Result | Verify-Equal "Passed"
             $r.Containers[0].Blocks[1].Tests[0].Result | Verify-Equal "Passed"
         }
+
+        t "Does not accept unbound scriptblocks" {
+            # Would execute in Pester's internal module state
+            $sb = { BeforeDiscovery ([ScriptBlock]::Create('$true')) }
+            $container = New-PesterContainer -ScriptBlock $sb
+            $r = Invoke-Pester -Container $container -PassThru
+            $r.Containers[0].Result | Verify-Equal 'Failed'
+            $r.Containers[0].ErrorRecord.Exception.Message | Verify-Like 'Unbound scriptblock*'
+        }
     }
 
     b "Parametric tests" {
         t "Providing data will generate as many Its as there are data sets" {
-            $sb = {
-                Describe "d" {
-                    It "i" {
-                    } -TestCases @(@{ Value = 1 }, @{ Value = 2 })
-                }
-            }
-
-            $container = New-PesterContainer -ScriptBlock $sb
-            $r = Invoke-Pester -Container $container -PassThru
-            $r.Containers[0].Blocks[0].Tests.Count | Verify-Equal 2
-        }
-
-        t "-ForEach is alias to -TestCases" {
             $sb = {
                 Describe "d" {
                     It "i" {
@@ -1720,52 +1722,221 @@ i -PassThru:$PassThru {
             $r.Containers[0].Blocks[0].Tests.Count | Verify-Equal 2
         }
 
-        t "Providing empty or `$null -TestCases will generate nothing" {
+        t "-TestCases is alias to -ForEach" {
             $sb = {
                 Describe "d" {
-                    It "i" { } -ForEach @()
-                }
-
-                Describe "d" {
-                    It "i" { } -ForEach $null
+                    It "i" {
+                    } -TestCases @(@{ Value = 1 }, @{ Value = 2 })
                 }
             }
 
             $container = New-PesterContainer -ScriptBlock $sb
             $r = Invoke-Pester -Container $container -PassThru
+            $r.Containers[0].Blocks[0].Tests.Count | Verify-Equal 2
+        }
+
+        t "Providing empty or `$null -ForEach will generate nothing when Run.FailOnNullOrEmptyForEach is False" {
+            $sb = {
+                Describe 'd' {
+                    It 'i' { } -ForEach @()
+                }
+
+                Describe 'd' {
+                    It 'i' { } -ForEach $null
+                }
+            }
+
+            $c = New-PesterConfiguration
+            $c.Run.Container = New-PesterContainer -ScriptBlock $sb
+            $c.Run.FailOnNullOrEmptyForEach = $false
+            $c.Run.PassThru = $true
+            $r = Invoke-Pester -Configuration $c
+
+            $r.Containers[0].Blocks[0].Tests.Count | Verify-Equal 0
+            $r.Containers[0].Blocks[1].Tests.Count | Verify-Equal 0
+        }
+
+        t "Providing empty or `$null -ForEach will throw when Run.FailOnNullOrEmptyForEach is True" {
+            $sbEmpty = {
+                Describe 'd' {
+                    It 'i' { } -ForEach @()
+                }
+            }
+
+            $sbNull = {
+                Describe 'd' {
+                    It 'i' { } -ForEach $null
+                }
+            }
+
+            $c = New-PesterConfiguration
+            $c.Run.Container = New-PesterContainer -ScriptBlock $sbEmpty, $sbNull
+            $c.Run.FailOnNullOrEmptyForEach = $true
+            $c.Run.PassThru = $true
+            $r = Invoke-Pester -Configuration $c
+
+            $r.Result = 'Failed'
+            $r.Containers[0].Result = 'Failed'
+            $r.Containers[0].ErrorRecord.Exception | Verify-Type ([System.ArgumentException])
+            $r.Containers[1].Result = 'Failed'
+            $r.Containers[1].ErrorRecord.Exception | Verify-Type ([System.ArgumentException])
+        }
+
+        t "Providing empty or `$null -ForEach will generate nothing when using -AllowNullOrEmptyForEach" {
+            $sb = {
+                Describe 'd' {
+                    It 'i' { } -ForEach @() -AllowNullOrEmptyForEach
+                }
+
+                Describe 'd' {
+                    It 'i' { } -ForEach $null -AllowNullOrEmptyForEach
+                }
+            }
+
+            $c = New-PesterConfiguration
+            $c.Run.Container = New-PesterContainer -ScriptBlock $sb
+            $c.Run.FailOnNullOrEmptyForEach = $true # Default but AllowNullOrEmptyForEach doesn't make sense without it
+            $c.Run.PassThru = $true
+            $r = Invoke-Pester -Configuration $c
+
             $r.Containers[0].Blocks[0].Tests.Count | Verify-Equal 0
             $r.Containers[0].Blocks[1].Tests.Count | Verify-Equal 0
         }
     }
 
-    b "Parametric blocks" {
-        t "Providing data will generate as many blocks as there are data sets" {
+    b 'Parametric blocks' {
+        t 'Providing data will generate as many blocks as there are data sets' {
             $sb = {
-                Describe "d" {
-                    It "i" {
-                    }
+                Describe 'd' {
+                    Context 'c' {
+                        It 'i' {
+                        }
+                    } -ForEach @(@{ Value = 1 }, @{ Value = 2 })
                 } -ForEach @(@{ Value = 1 }, @{ Value = 2 })
             }
 
             $container = New-PesterContainer -ScriptBlock $sb
-            $r = Invoke-Pester -Container $container -PassThru #
+            $r = Invoke-Pester -Container $container -PassThru
+
             $r.Containers[0].Blocks.Count | Verify-Equal 2
+            $r.Containers[0].Blocks[0].Blocks.Count | Verify-Equal 2
+            $r.Containers[0].Blocks[1].Blocks.Count | Verify-Equal 2
         }
 
-        t "Providing empty or `$null -ForEach will generate nothing" {
-            $sb = {
-                Describe "d" {
-                    It "i" { }
+        t "Providing empty or `$null to -ForEach will generate nothing when Run.FailOnNullOrEmptyForEach is False" {
+            $sbDescribe = {
+                Describe 'dEmpty' {
+                    It 'i' { }
                 } -ForEach @()
 
-                Describe "d" {
-                    It "i" { }
+                Describe 'dNull' {
+                    It 'i' { }
                 } -ForEach $null
             }
 
-            $container = New-PesterContainer -ScriptBlock $sb
-            $r = Invoke-Pester -Container $container -PassThru
-            $r.Containers[0].Blocks.Count | Verify-Equal 0
+            $sbContext = {
+                Describe 'dContext' {
+                    Context 'cEmpty' {
+                        It 'i' { }
+                    } -ForEach @()
+
+                    Context 'cNull' {
+                        It 'i' { }
+                    } -ForEach $null
+                }
+            }
+
+            $c = New-PesterConfiguration
+            $c.Run.Container = New-PesterContainer -ScriptBlock $sbDescribe, $sbContext
+            $c.Run.FailOnNullOrEmptyForEach = $false
+            $c.Run.PassThru = $true
+            $r = Invoke-Pester -Configuration $c
+
+            $r.Containers[0].Blocks.Count | Verify-Equal 0 # No Describe-blocks will be generated
+
+            $r.Containers[1].Blocks.Count | Verify-Equal 1
+            $r.Containers[1].Blocks[0].Name | Verify-Equal 'dContext'
+            $r.Containers[1].Blocks[0].Blocks.Count | Verify-Equal 0 # No Context-blocks will be generated
+        }
+
+        t "Providing empty or `$null to -ForEach will throw when Run.FailOnNullOrEmptyForEach is True" {
+            $sbDescribeEmpty = {
+                Describe 'dEmpty' {
+                    It 'i' { }
+                } -ForEach @()
+            }
+            $sbDescribeNull = {
+                Describe 'dNull' {
+                    It 'i' { }
+                } -ForEach $null
+            }
+
+            $sbContextEmpty = {
+                Describe 'dContext' {
+                    Context 'cEmpty' {
+                        It 'i' { }
+                    } -ForEach @()
+                }
+            }
+            $sbContextNull = {
+                Describe 'dContext' {
+                    Context 'cNull' {
+                        It 'i' { }
+                    } -ForEach $null
+                }
+            }
+
+            $c = New-PesterConfiguration
+            $c.Run.Container = New-PesterContainer -ScriptBlock $sbDescribeEmpty, $sbDescribeNull, $sbContextEmpty, $sbContextNull
+            $c.Run.FailOnNullOrEmptyForEach = $true
+            $c.Run.PassThru = $true
+            $r = Invoke-Pester -Configuration $c
+
+            $r.Result = 'Failed'
+            $r.Containers[0].Result = 'Failed'
+            $r.Containers[0].ErrorRecord.Exception | Verify-Type ([System.ArgumentException])
+            $r.Containers[1].Result = 'Failed'
+            $r.Containers[1].ErrorRecord.Exception | Verify-Type ([System.ArgumentException])
+            $r.Containers[2].Result = 'Failed'
+            $r.Containers[2].ErrorRecord.Exception | Verify-Type ([System.ArgumentException])
+            $r.Containers[3].Result = 'Failed'
+            $r.Containers[3].ErrorRecord.Exception | Verify-Type ([System.ArgumentException])
+        }
+
+        t "Providing empty or `$null to -ForEach will generate nothing when using -AllowNullOrEmptyForEach" {
+            $sbDescribe = {
+                Describe 'dEmpty' {
+                    It 'i' { }
+                } -ForEach @() -AllowNullOrEmptyForEach
+
+                Describe 'dNull' {
+                    It 'i' { }
+                } -ForEach $null -AllowNullOrEmptyForEach
+            }
+
+            $sbContext = {
+                Describe 'dContext' {
+                    Context 'cEmpty' {
+                        It 'i' { }
+                    } -ForEach @() -AllowNullOrEmptyForEach
+
+                    Context 'cNull' {
+                        It 'i' { }
+                    } -ForEach $null -AllowNullOrEmptyForEach
+                }
+            }
+
+            $c = New-PesterConfiguration
+            $c.Run.Container = New-PesterContainer -ScriptBlock $sbDescribe, $sbContext
+            $c.Run.FailOnNullOrEmptyForEach = $true # Default but AllowNullOrEmptyForEach doesn't make sense without it
+            $c.Run.PassThru = $true
+            $r = Invoke-Pester -Configuration $c
+
+            $r.Containers[0].Blocks.Count | Verify-Equal 0 # No Describe-blocks will be generated
+
+            $r.Containers[1].Blocks.Count | Verify-Equal 1
+            $r.Containers[1].Blocks[0].Name | Verify-Equal 'dContext'
+            $r.Containers[1].Blocks[0].Blocks.Count | Verify-Equal 0 # No Context-blocks will be generated
         }
 
         t "Data will be available in the respective block during Run" {
@@ -1987,24 +2158,6 @@ i -PassThru:$PassThru {
             $r = Invoke-Pester -Container $container -PassThru -Output Detailed
             $r.Containers[0].Blocks[0].Tests[0].Result | Verify-Equal "Passed"
             $r.Containers[0].Blocks[0].Tests[0].ExpandedName | Verify-Equal "i Jakub is string"
-        }
-    }
-
-    b "Should with legacy syntax will throw" {
-        t "Should with legacy syntax will throw" {
-            $sb = {
-                Describe "d" {
-                    It "i" {
-                        1 | Should Be 1
-                    }
-                }
-            }
-
-            $container = New-PesterContainer -ScriptBlock $sb
-            $r = Invoke-Pester -Container $container -PassThru
-            $test = $r.Containers[0].Blocks[0].Tests[0]
-            $test.Result | Verify-Equal "Failed"
-            $test.ErrorRecord[0] -like "*Legacy Should syntax (without dashes) is not supported in Pester 5.*"
         }
     }
 
@@ -2591,6 +2744,179 @@ i -PassThru:$PassThru {
             $r.Containers[1].Blocks[0].Tests[0].ErrorRecord.FullyQualifiedErrorID | Verify-Equal 'PesterTestSkipped'
             $r.Containers[1].Blocks[0].Tests[0].ErrorRecord.TargetObject.Message | Verify-Equal "Skipped due to previous failure at 'a.b' and Run.SkipRemainingOnFailure set to 'Run'"
         }
+
+        foreach ($mode in 'Block', 'Container', 'Run') {
+            t "Ignore tests with -Skip or excluded by filter in mode '$mode'" {
+                $sb1 = {
+                    Describe 'a' {
+                        It 'Included - fails' -Tag 'Demo' {
+                            $false | Should -BeTrue
+                        }
+                        It 'Excluded - ignore' {
+                            $true | Should -BeTrue
+                        }
+                        Describe 'b' {
+                            It 'Included - skip' -Tag 'Demo' {
+                                $true | Should -BeTrue
+                            }
+                            It 'Included but skipped - ignore' -Tag 'Demo' -Skip {
+                                $true | Should -BeTrue
+                            }
+                        }
+                    }
+                    Describe 'c' {
+                        It 'Included - skip on Container and Run' -Tag 'Demo' {
+                            $true | Should -BeTrue
+                        }
+                    }
+                }
+
+                $sb2 = {
+                    Describe 'd' {
+                        It 'Included - skip on Run' -Tag 'Demo' {
+                            $true | Should -BeTrue
+                        }
+                    }
+                }
+
+                $c = [PesterConfiguration] @{
+                    Filter = @{
+                        Tag = 'Demo'
+                    }
+                    Run    = @{
+                        ScriptBlock            = $sb1, $sb2
+                        PassThru               = $true
+                        SkipRemainingOnFailure = $mode
+                    }
+                    Output = @{
+                        CIFormat = 'None'
+                    }
+                }
+
+                $r = Invoke-Pester -Configuration $c
+
+                $r.Tests[0].Skipped | Verify-False
+                $r.Tests[0].Result | Verify-Equal 'Failed'
+
+                # Should not mark excluded tests as Skipped
+                $r.Tests[1].Skipped | Verify-False
+                $r.Tests[1].Result | Verify-Equal 'NotRun'
+
+                # Should mark included test as Skipped
+                $r.Tests[2].Skipped | Verify-True
+                $r.Tests[2].Result | Verify-Equal 'Skipped'
+                $r.Tests[2].ErrorRecord.TargetObject.Message -match '^Skipped due to previous failure' | Verify-True
+
+                # Should not modify explicitly skipped tests
+                $r.Tests[3].Skipped | Verify-True
+                $r.Tests[3].Result | Verify-Equal 'Skipped'
+                $r.Tests[3].ErrorRecord | Verify-Null
+
+                switch ($mode) {
+                    'Block' { $r.PluginConfiguration.SkipRemainingOnFailureCount | Verify-Equal 1 }
+                    'Container' { $r.PluginConfiguration.SkipRemainingOnFailureCount | Verify-Equal 2 }
+                    'Run' { $r.PluginConfiguration.SkipRemainingOnFailureCount | Verify-Equal 3 }
+                }
+            }
+        }
+
+        foreach ($mode in 'Block', 'Container', 'Run') {
+            t "Remaining blocks are skipped in mode '$mode'" {
+                $container = [ordered]@{
+                    RootBeforeAll  = 0
+                    RootAfterAll   = 0
+                    BlockBeforeAll = 0
+                    BlockAfterAll  = 0
+                }
+
+                $sb1 = {
+                    BeforeAll { $container.RootBeforeAll++ }
+                    AfterAll { $container.RootAfterAll++ }
+
+                    Describe 'd1' {
+                        BeforeAll { $container.BlockBeforeAll++ }
+                        AfterAll { $container.BlockAfterAll++ }
+
+                        It 'Fails' { $false | Should -BeTrue }
+
+                        Context 'c1' {
+                            BeforeAll { $container.BlockBeforeAll++ }
+                            AfterAll { $container.BlockAfterAll++ }
+                            It 'Skipped' { $true | Should -BeTrue }
+                        }
+                    }
+                    Describe 'd2' {
+                        BeforeAll { $container.BlockBeforeAll++ }
+                        AfterAll { $container.BlockAfterAll++ }
+
+                        It 'Skipped' { $true | Should -BeTrue }
+                    }
+                }
+
+                $sb2 = {
+                    BeforeAll { $container.RootBeforeAll++ }
+                    AfterAll { $container.RootAfterAll++ }
+
+                    Describe 'd1' {
+                        BeforeAll { $container.BlockBeforeAll++ }
+                        AfterAll { $container.BlockAfterAll++ }
+
+                        It 'Skipped' { $true | Should -BeTrue }
+                    }
+                }
+
+                $c = [PesterConfiguration] @{
+                    Run    = @{
+                        ScriptBlock            = $sb1, $sb2
+                        PassThru               = $true
+                        SkipRemainingOnFailure = $mode
+                    }
+                    Output = @{
+                        CIFormat = 'None'
+                    }
+                }
+
+                $r = Invoke-Pester -Configuration $c
+                $r.Containers[0].Result | Verify-Equal 'Failed'
+                $r.Containers[0].Blocks[0].Result | Verify-Equal 'Failed'
+                $r.Containers[0].Blocks[0].Blocks[0].Result | Verify-Equal 'Skipped'
+
+                # AfterAll should always execute for current and parent blocks of the failure
+                # BeforeAll and AfterAll should not be executed for remaining children or siblings
+                switch ($mode) {
+                    'Block' {
+                        $r.Containers[0].Blocks[1].Result | Verify-Equal 'Passed'
+                        $r.Containers[1].Result | Verify-Equal 'Passed'
+                        $r.Containers[1].Blocks[0].Result | Verify-Equal 'Passed'
+
+                        $container.RootBeforeAll | Verify-Equal 2
+                        $container.RootAfterAll | Verify-Equal 2
+                        $container.BlockBeforeAll | Verify-Equal 3
+                        $container.BlockAfterAll | Verify-Equal 3
+                    }
+                    'Container' {
+                        $r.Containers[0].Blocks[1].Result | Verify-Equal 'Skipped'
+                        $r.Containers[1].Result | Verify-Equal 'Passed'
+                        $r.Containers[1].Blocks[0].Result | Verify-Equal 'Passed'
+
+                        $container.RootBeforeAll | Verify-Equal 2
+                        $container.RootAfterAll | Verify-Equal 2
+                        $container.BlockBeforeAll | Verify-Equal 2
+                        $container.BlockAfterAll | Verify-Equal 2
+                    }
+                    'Run' {
+                        $r.Containers[0].Blocks[1].Result | Verify-Equal 'Skipped'
+                        $r.Containers[1].Result | Verify-Equal 'Skipped'
+                        $r.Containers[1].Blocks[0].Result | Verify-Equal 'Skipped'
+
+                        $container.RootBeforeAll | Verify-Equal 1
+                        $container.RootAfterAll | Verify-Equal 1
+                        $container.BlockBeforeAll | Verify-Equal 1
+                        $container.BlockAfterAll | Verify-Equal 1
+                    }
+                }
+            }
+        }
     }
 
     b 'Changes to CWD are reverted on exit' {
@@ -2609,6 +2935,35 @@ i -PassThru:$PassThru {
             $container = New-PesterContainer -ScriptBlock $sb
             Invoke-Pester -Container $container -Output None
             $pwd.Path | Verify-Equal $beforePWD
+        }
+    }
+
+    b 'Unbound scriptblocks' {
+        # Would execute in Pester's internal module state
+        t 'Throws when provided to Run.ScriptBlock' {
+            $sb = [scriptblock]::Create('')
+            $conf = New-PesterConfiguration
+            $conf.Run.ScriptBlock = $sb
+            $conf.Run.Throw = $true
+            $conf.Output.CIFormat = 'None'
+
+            $ex = { Invoke-Pester -Configuration $conf } | Verify-Throw
+            $ex.Exception.Message | Verify-Like '*Unbound scriptblock*'
+        }
+
+        t 'Throws when provided to Run.Container' {
+            $c = [Pester.ContainerInfo]::Create()
+            $c.Type = 'ScriptBlock'
+            $c.Item = [scriptblock]::Create('')
+            $c.Data = @{}
+
+            $conf = New-PesterConfiguration
+            $conf.Run.Container = $c
+            $conf.Run.Throw = $true
+            $conf.Output.CIFormat = 'None'
+
+            $ex = { Invoke-Pester -Configuration $conf } | Verify-Throw
+            $ex.Exception.Message | Verify-Like '*Unbound scriptblock*'
         }
     }
 }

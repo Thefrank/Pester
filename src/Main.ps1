@@ -44,7 +44,7 @@ function Add-ShouldOperator {
             }
         }
 
-        return New-Object psobject -Property @{
+        return [PSCustomObject]@{
             Succeeded      = $succeeded
             FailureMessage = $failureMessage
         }
@@ -80,17 +80,14 @@ function Add-ShouldOperator {
         [switch] $SupportsArrayInput
     )
 
-    $entry = & $SafeCommands['New-Object'] psobject -Property @{
+    Assert-BoundScriptBlockInput -ScriptBlock $Test
+
+    $entry = [PSCustomObject]@{
         Test               = $Test
         SupportsArrayInput = [bool]$SupportsArrayInput
         Name               = $Name
         Alias              = $Alias
-        InternalName       = If ($InternalName) {
-            $InternalName
-        }
-        Else {
-            $Name
-        }
+        InternalName       = If ($InternalName) { $InternalName } else { $Name }
     }
     if (Test-AssertionOperatorIsDuplicate -Operator $entry) {
         # This is an exact duplicate of an existing assertion operator.
@@ -197,20 +194,20 @@ function Add-AssertionDynamicParameterSet {
     $commandInfo = & $SafeCommands['Get-Command'] __AssertionTest__ -CommandType Function
     $metadata = [System.Management.Automation.CommandMetadata]$commandInfo
 
-    $attribute = & $SafeCommands['New-Object'] Management.Automation.ParameterAttribute
+    $attribute = [Management.Automation.ParameterAttribute]::new()
     $attribute.ParameterSetName = $AssertionEntry.Name
 
 
-    $attributeCollection = & $SafeCommands['New-Object'] Collections.ObjectModel.Collection[Attribute]
+    $attributeCollection = [Collections.ObjectModel.Collection[Attribute]]::new()
     $null = $attributeCollection.Add($attribute)
     if (-not ([string]::IsNullOrWhiteSpace($AssertionEntry.Alias))) {
         Assert-ValidAssertionAlias -Alias $AssertionEntry.Alias
-        $attribute = & $SafeCommands['New-Object'] System.Management.Automation.AliasAttribute($AssertionEntry.Alias)
+        $attribute = [System.Management.Automation.AliasAttribute]::new($AssertionEntry.Alias)
         $attributeCollection.Add($attribute)
     }
 
     # Register assertion
-    $dynamic = & $SafeCommands['New-Object'] System.Management.Automation.RuntimeDefinedParameter($AssertionEntry.Name, [switch], $attributeCollection)
+    $dynamic = [System.Management.Automation.RuntimeDefinedParameter]::new($AssertionEntry.Name, [switch], $attributeCollection)
     $null = $script:AssertionDynamicParams.Add($AssertionEntry.Name, $dynamic)
 
     # Register -Not in the assertion's parameter set. Create parameter if not already present (first assertion).
@@ -218,11 +215,11 @@ function Add-AssertionDynamicParameterSet {
         $dynamic = $script:AssertionDynamicParams['Not']
     }
     else {
-        $dynamic = & $SafeCommands['New-Object'] System.Management.Automation.RuntimeDefinedParameter('Not', [switch], (& $SafeCommands['New-Object'] System.Collections.ObjectModel.Collection[Attribute]))
+        $dynamic = [System.Management.Automation.RuntimeDefinedParameter]::new('Not', [switch], ([System.Collections.ObjectModel.Collection[Attribute]]::new()))
         $null = $script:AssertionDynamicParams.Add('Not', $dynamic)
     }
 
-    $attribute = & $SafeCommands['New-Object'] System.Management.Automation.ParameterAttribute
+    $attribute = [System.Management.Automation.ParameterAttribute]::new()
     $attribute.ParameterSetName = $AssertionEntry.Name
     $attribute.Mandatory = $false
     $attribute.HelpMessage = 'Reverse the assertion'
@@ -264,11 +261,11 @@ function Add-AssertionDynamicParameterSet {
                 $type = [object]
             }
 
-            $dynamic = & $SafeCommands['New-Object'] System.Management.Automation.RuntimeDefinedParameter($parameter.Name, $type, (& $SafeCommands['New-Object'] System.Collections.ObjectModel.Collection[Attribute]))
+            $dynamic = [System.Management.Automation.RuntimeDefinedParameter]::new($parameter.Name, $type, ([System.Collections.ObjectModel.Collection[Attribute]]::new()))
             $null = $script:AssertionDynamicParams.Add($parameter.Name, $dynamic)
         }
 
-        $attribute = & $SafeCommands['New-Object'] Management.Automation.ParameterAttribute
+        $attribute = [Management.Automation.ParameterAttribute]::new()
         $attribute.ParameterSetName = $AssertionEntry.Name
         $attribute.Mandatory = $false
         $attribute.Position = ($i++)
@@ -285,20 +282,6 @@ function Get-AssertionOperatorEntry([string] $Name) {
 
 function Get-AssertionDynamicParams {
     return $script:AssertionDynamicParams
-}
-
-function Has-Flag {
-    param
-    (
-        [Parameter(Mandatory = $true)]
-        [Pester.OutputTypes]
-        $Setting,
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [Pester.OutputTypes]
-        $Value
-    )
-
-    0 -ne ($Setting -band $Value)
 }
 
 function Invoke-Pester {
@@ -331,7 +314,7 @@ function Invoke-Pester {
     EnableExit parameter to return an exit code that contains the number of failed
     tests.
 
-    You can also use the Strict parameter to fail all pending and skipped tests.
+    You can also use the Strict parameter to fail all skipped tests.
     This feature is ideal for build systems and other processes that require success
     on every test.
 
@@ -419,16 +402,8 @@ function Invoke-Pester {
     https://github.com/danielpalme/ReportGenerator
 
     .PARAMETER Configuration
-    (Introduced v5)
-    [PesterConfiguration] object for Advanced Configuration
-
-    Pester supports Simple and Advanced Configuration.
-
-    Invoke-Pester -Configuration <PesterConfiguration> [<CommonParameters>]
-
-    Default is New-PesterConfiguration.
-
-    For help on each option see New-PesterConfiguration, or inspect the object it returns.
+    [PesterConfiguration] object for Advanced Configuration created using `New-PesterConfiguration`.
+    For help on each option see about_PesterConfiguration or inspect the object.
 
     .PARAMETER Container
     Specifies one or more ContainerInfo-objects that define containers with tests.
@@ -491,11 +466,6 @@ function Invoke-Pester {
     This parameter is ignored in v5, and is only present for backwards compatibility
     when migrating from v4.
 
-    Sets advanced options for the test execution. Enter a PesterOption object,
-    such as one that you create by using the New-PesterOption cmdlet, or a hash table
-    in which the keys are option names and the values are option values.
-    For more information on the options available, see the help for New-PesterOption.
-
     .PARAMETER Quiet
     (Deprecated v4)
     The parameter Quiet is deprecated since Pester v4.0 and will be deleted
@@ -510,7 +480,7 @@ function Invoke-Pester {
     (Deprecated v4)
     Replace with ConfigurationProperty Output.Verbosity
     Customizes the output Pester writes to the screen. Available options are None, Default,
-    Passed, Failed, Pending, Skipped, Inconclusive, Describe, Context, Summary, Header, All, Fails.
+    Passed, Failed, Skipped, Inconclusive, Describe, Context, Summary, Header, All, Fails.
     The options can be combined to define presets.
     ConfigurationProperty Output.Verbosity supports the following values:
     None
@@ -535,7 +505,7 @@ function Invoke-Pester {
 
     .PARAMETER Strict
     (Deprecated v4)
-    Makes Pending and Skipped tests to Failed tests. Useful for continuous
+    Makes Skipped tests to Failed tests. Useful for continuous
     integration where you need to make sure all tests passed.
 
     .PARAMETER TagFilter
@@ -571,7 +541,7 @@ function Invoke-Pester {
     even if the first fails.
 
     .EXAMPLE
-    $config = [PesterConfiguration]::Default
+    $config = New-PesterConfiguration
     $config.TestResult.Enabled = $true
     Invoke-Pester -Configuration $config
 
@@ -589,6 +559,7 @@ function Invoke-Pester {
     # Currently doesn't work. $IgnoreUnsafeCommands filter used in rule as workaround
     # [Diagnostics.CodeAnalysis.SuppressMessageAttribute('Pester.BuildAnalyzerRules\Measure-SafeCommands', 'Remove-Variable', Justification = 'Remove-Variable can't remove "optimized variables" when using "alias" for Remove-Variable.')]
     [CmdletBinding(DefaultParameterSetName = 'Simple')]
+    [OutputType([Pester.Run])]
     param(
         [Parameter(Position = 0, Mandatory = 0, ParameterSetName = "Simple")]
         [Parameter(Position = 0, Mandatory = 0, ParameterSetName = "Legacy")]  # Legacy set for v4 compatibility during migration - deprecated
@@ -630,40 +601,40 @@ function Invoke-Pester {
         [PesterConfiguration] $Configuration,
 
         # rest of the Legacy set
-        [Parameter(Position = 2, Mandatory = 0, ParameterSetName = "Legacy")]  # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(Position = 2, Mandatory = 0, ParameterSetName = "Legacy", DontShow)]  # Legacy set for v4 compatibility during migration - deprecated
         [switch]$EnableExit,
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [object[]] $CodeCoverage = @(),
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [string] $CodeCoverageOutputFile,
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [string] $CodeCoverageOutputFileEncoding = 'utf8',
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [ValidateSet('JaCoCo')]
         [String]$CodeCoverageOutputFileFormat = "JaCoCo",
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [Switch]$Strict,
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [string] $OutputFile,
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [ValidateSet('NUnitXml', 'NUnit2.5', 'JUnitXml')]
         [string] $OutputFormat = 'NUnitXml',
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [Switch]$Quiet,
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
         [object]$PesterOption,
 
-        [Parameter(ParameterSetName = "Legacy")] # Legacy set for v4 compatibility during migration - deprecated
-        [Pester.OutputTypes]$Show = 'All'
+        [Parameter(ParameterSetName = "Legacy", DontShow)] # Legacy set for v4 compatibility during migration - deprecated
+        [String] $Show = 'All'
     )
     begin {
         $start = [DateTime]::Now
@@ -747,12 +718,12 @@ function Invoke-Pester {
             }
 
             $plugins.Add((
-                # decorator plugin needs to be added after output
-                # because on teardown they will run in opposite order
-                # and that way output can consume the fixed object that decorator
-                # decorated, not nice but works
-                Get-RSpecObjectDecoratorPlugin
-            ))
+                    # decorator plugin needs to be added after output
+                    # because on teardown they will run in opposite order
+                    # and that way output can consume the fixed object that decorator
+                    # decorated, not nice but works
+                    Get-RSpecObjectDecoratorPlugin
+                ))
 
             if ($PesterPreference.TestDrive.Enabled.Value) {
                 $plugins.Add((Get-TestDrivePlugin))
@@ -861,7 +832,8 @@ function Invoke-Pester {
                 Remove-RSPecNonPublicProperties $run
             }
 
-            if ($PesterPreference.Run.PassThru.Value) {
+            $failedCount = $run.FailedCount + $run.FailedBlocksCount + $run.FailedContainersCount
+            if ($PesterPreference.Run.PassThru.Value -and -not ($PesterPreference.Run.Exit.Value -and 0 -ne $failedCount)) {
                 $run
             }
 
@@ -888,12 +860,10 @@ function Invoke-Pester {
         # go back to original CWD
         if ($null -ne $initialPWD) { & $SafeCommands['Set-Location'] -Path $initialPWD }
 
-        # exit with exit code if we fail and even if we succeed, otherwise we could inherit
-        # exit code of some other app end exit with it's exit code instead with ours
-        $failedCount = $run.FailedCount + $run.FailedBlocksCount + $run.FailedContainersCount
         # always set exit code. This both to:
-        # - prevent previous commands failing with non-zero exit code from failing the run
+        # - avoid inheriting a previous commands non-zero exit code
         # - setting the exit code when there were some failed tests, blocks, or containers
+        $failedCount = $run.FailedCount + $run.FailedBlocksCount + $run.FailedContainersCount
         $global:LASTEXITCODE = $failedCount
 
         if ($PesterPreference.Run.Throw.Value -and 0 -ne $failedCount) {
@@ -1075,7 +1045,7 @@ function Convert-PesterLegacyParameterSet ($BoundParameters) {
             if ($null -ne $Show) {
                 # most used v4 options are adapted, and it also takes v5 options to be able to migrate gradually
                 # without switching the whole param set just to get Diagnostic output
-                # {None | Default | Passed | Failed | Pending | Skipped | Inconclusive | Describe | Context | Summary | Header | Fails | All}
+                # {None | Default | Passed | Failed | Skipped | Inconclusive | Describe | Context | Summary | Header | Fails | All}
                 $verbosity = switch ($Show) {
                     'All' { 'Detailed' }
                     'Default' { 'Detailed' }
@@ -1122,230 +1092,6 @@ function Convert-PesterLegacyParameterSet ($BoundParameters) {
     return $Configuration
 }
 
-function New-PesterOption {
-    #TODO: move those options, right now I am just not exposing this function and added the testSuiteName
-    <#
-    .SYNOPSIS
-    Creates an object that contains advanced options for Invoke-Pester
-    .DESCRIPTION
-    By using New-PesterOption you can set options what allow easier integration with external applications or
-    modifies output generated by Invoke-Pester.
-    The result of New-PesterOption need to be assigned to the parameter 'PesterOption' of the Invoke-Pester function.
-    .PARAMETER IncludeVSCodeMarker
-    When this switch is set, an extra line of output will be written to the console for test failures, making it easier
-    for VSCode's parser to provide highlighting / tooltips on the line where the error occurred.
-    .PARAMETER TestSuiteName
-    When generating NUnit XML output, this controls the name assigned to the root "test-suite" element.  Defaults to "Pester".
-    .PARAMETER ScriptBlockFilter
-    Filters scriptblock based on the path and line number. This is intended for integration with external tools so we don't rely on names (strings) that can have expandable variables in them.
-    .PARAMETER Experimental
-    Enables experimental features of Pester to be enabled.
-    .PARAMETER ShowScopeHints
-    EXPERIMENTAL: Enables debugging output for debugging transitions among scopes. (Experimental flag needs to be used to enable this.)
-
-    .INPUTS
-    None
-    You cannot pipe input to this command.
-    .OUTPUTS
-    System.Management.Automation.PSObject
-    .EXAMPLE
-        PS > $Options = New-PesterOption -TestSuiteName "Tests - Set A"
-
-        PS > Invoke-Pester -PesterOption $Options -Outputfile ".\Results-Set-A.xml" -OutputFormat NUnitXML
-
-        The result of commands will be execution of tests and saving results of them in a NUnitMXL file where the root "test-suite"
-        will be named "Tests - Set A".
-    .LINK
-    https://github.com/pester/Pester/wiki/New-PesterOption
-
-    .LINK
-    Invoke-Pester
-    #>
-    [CmdletBinding()]
-    param (
-        [switch] $IncludeVSCodeMarker,
-
-        [ValidateNotNullOrEmpty()]
-        [string] $TestSuiteName = 'Pester',
-
-        [switch] $Experimental,
-
-        [switch] $ShowScopeHints,
-
-        [hashtable[]] $ScriptBlockFilter
-    )
-
-    # in PowerShell 2 Add-Member can attach properties only to
-    # PSObjects, I could work around this by capturing all instances
-    # in checking them during runtime, but that would bring a lot of
-    # object management problems - so let's just not allow this in PowerShell 2
-    if ($Experimental -and $ShowScopeHints) {
-        if ($PSVersionTable.PSVersion.Major -lt 3) {
-            throw "Scope hints cannot be used on PowerShell 2 due to limitations of Add-Member."
-        }
-
-        $script:DisableScopeHints = $false
-    }
-    else {
-        $script:DisableScopeHints = $true
-    }
-
-    return & $script:SafeCommands['New-Object'] psobject -Property @{
-        ReadMe              = "New-PesterOption is deprecated and kept only for backwards compatibility when executing Pester v5 using the " +
-        "legacy parameter set. When the object is used with Invoke-Pester -PesterOption it will be ignored."
-        IncludeVSCodeMarker = [bool] $IncludeVSCodeMarker
-        TestSuiteName       = $TestSuiteName
-        ShowScopeHints      = $ShowScopeHints
-        Experimental        = $Experimental
-        ScriptBlockFilter   = $ScriptBlockFilter
-    }
-}
-
-function ResolveTestScripts {
-    param ([object[]] $Path)
-
-    $resolvedScriptInfo = @(
-        foreach ($object in $Path) {
-            if ($object -is [System.Collections.IDictionary]) {
-                $unresolvedPath = Get-DictionaryValueFromFirstKeyFound -Dictionary $object -Key 'Path', 'p'
-                $script = Get-DictionaryValueFromFirstKeyFound -Dictionary $object -Key 'Script'
-                $arguments = @(Get-DictionaryValueFromFirstKeyFound -Dictionary $object -Key 'Arguments', 'args', 'a')
-                $parameters = Get-DictionaryValueFromFirstKeyFound -Dictionary $object -Key 'Parameters', 'params'
-
-                if ($null -eq $Parameters) {
-                    $Parameters = @{}
-                }
-
-                if ($unresolvedPath -isnot [string] -or $unresolvedPath -notmatch '\S' -and ($script -isnot [string] -or $script -notmatch '\S')) {
-                    throw 'When passing hashtables to the -Path parameter, the Path key is mandatory, and must contain a single string.'
-                }
-
-                if ($null -ne $parameters -and $parameters -isnot [System.Collections.IDictionary]) {
-                    throw 'When passing hashtables to the -Path parameter, the Parameters key (if present) must be assigned an IDictionary object.'
-                }
-            }
-            else {
-                $unresolvedPath = [string] $object
-                $script = [string] $object
-                $arguments = @()
-                $parameters = @{}
-            }
-
-            if (-not [string]::IsNullOrEmpty($unresolvedPath)) {
-                if ($unresolvedPath -notmatch '[\*\?\[\]]' -and
-                    (& $script:SafeCommands['Test-Path'] -LiteralPath $unresolvedPath -PathType Leaf) -and
-                    (& $script:SafeCommands['Get-Item'] -LiteralPath $unresolvedPath) -is [System.IO.FileInfo]) {
-                    $extension = [System.IO.Path]::GetExtension($unresolvedPath)
-                    if ($extension -ne '.ps1') {
-                        & $script:SafeCommands['Write-Error'] "Script path '$unresolvedPath' is not a ps1 file."
-                    }
-                    else {
-                        & $script:SafeCommands['New-Object'] psobject -Property @{
-                            Path       = $unresolvedPath
-                            Script     = $null
-                            Arguments  = $arguments
-                            Parameters = $parameters
-                        }
-                    }
-                }
-                else {
-                    # World's longest pipeline?
-
-                    & $script:SafeCommands['Resolve-Path'] -Path $unresolvedPath |
-                        & $script:SafeCommands['Where-Object'] { $_.Provider.Name -eq 'FileSystem' } |
-                        & $script:SafeCommands['Select-Object'] -ExpandProperty ProviderPath |
-                        & $script:SafeCommands['Get-ChildItem'] -Include *.Tests.ps1 -Recurse |
-                        & $script:SafeCommands['Where-Object'] { -not $_.PSIsContainer } |
-                        & $script:SafeCommands['Select-Object'] -ExpandProperty FullName -Unique |
-                        & $script:SafeCommands['ForEach-Object'] {
-                            & $script:SafeCommands['New-Object'] psobject -Property @{
-                                Path       = $_
-                                Script     = $null
-                                Arguments  = $arguments
-                                Parameters = $parameters
-                            }
-                        }
-                }
-            }
-            elseif (-not [string]::IsNullOrEmpty($script)) {
-                & $script:SafeCommands['New-Object'] psobject -Property @{
-                    Path       = $null
-                    Script     = $script
-                    Arguments  = $arguments
-                    Parameters = $parameters
-                }
-            }
-        }
-    )
-
-    # Here, we have the option of trying to weed out duplicate file paths that also contain identical
-    # Parameters / Arguments.  However, we already make sure that each object in $Path didn't produce
-    # any duplicate file paths, and if the caller happens to pass in a set of parameters that produce
-    # dupes, maybe that's not our problem.  For now, just return what we found.
-
-    $resolvedScriptInfo
-}
-
-function Get-DictionaryValueFromFirstKeyFound {
-    param ([System.Collections.IDictionary] $Dictionary, [object[]] $Key)
-
-    foreach ($keyToTry in $Key) {
-        if ($Dictionary.Contains($keyToTry)) {
-            return $Dictionary[$keyToTry]
-        }
-    }
-}
-
-function Set-PesterStatistics($Node) {
-    if ($null -eq $Node) {
-        $Node = $pester.TestActions
-    }
-
-    foreach ($action in $Node.Actions) {
-        if ($action.Type -eq 'TestGroup') {
-            Set-PesterStatistics -Node $action
-
-            $Node.TotalCount += $action.TotalCount
-            $Node.PassedCount += $action.PassedCount
-            $Node.FailedCount += $action.FailedCount
-            $Node.SkippedCount += $action.SkippedCount
-            $Node.PendingCount += $action.PendingCount
-            $Node.InconclusiveCount += $action.InconclusiveCount
-        }
-        elseif ($action.Type -eq 'TestCase') {
-            $node.TotalCount++
-
-            switch ($action.Result) {
-                Passed {
-                    $Node.PassedCount++; break;
-                }
-                Failed {
-                    $Node.FailedCount++; break;
-                }
-                Skipped {
-                    $Node.SkippedCount++; break;
-                }
-                Pending {
-                    $Node.PendingCount++; break;
-                }
-                Inconclusive {
-                    $Node.InconclusiveCount++; break;
-                }
-            }
-        }
-    }
-}
-
-function Contain-AnyStringLike ($Filter, $Collection) {
-    foreach ($item in $Collection) {
-        foreach ($value in $Filter) {
-            if ($item -like $value) {
-                return $true
-            }
-        }
-    }
-    return $false
-}
 
 function ConvertTo-Pester4Result {
     <#
@@ -1394,7 +1140,6 @@ function ConvertTo-Pester4Result {
             PassedCount       = 0
             FailedCount       = 0
             SkippedCount      = 0
-            PendingCount      = 0
             InconclusiveCount = 0
             Time              = [TimeSpan]::Zero
             TestResult        = [System.Collections.Generic.List[object]]@()
@@ -1458,11 +1203,12 @@ function ConvertTo-Pester4Result {
                 "Skipped" {
                     $legacyResult.SkippedCount++
                 }
+                "Inconclusive" {
+                    $legacyResult.InconclusiveCount++
+                }
             }
         }
         $legacyResult.TotalCount = $legacyResult.TestResult.Count
-        $legacyResult.PendingCount = 0
-        $legacyResult.InconclusiveCount = 0
         $legacyResult.Time = $PesterResult.Duration
 
         $legacyResult
@@ -1515,6 +1261,8 @@ function BeforeDiscovery {
         [Parameter(Mandatory)]
         [ScriptBlock]$ScriptBlock
     )
+
+    Assert-BoundScriptBlockInput -ScriptBlock $ScriptBlock
 
     if ($ExecutionContext.SessionState.PSVariable.Get('invokedViaInvokePester')) {
         if ($state.CurrentBlock.IsRoot -and -not $state.CurrentBlock.FrameworkData.MissingParametersProcessed) {

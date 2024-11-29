@@ -26,8 +26,7 @@ $script:ReportStrings = DATA {
 
         TestsPassed       = 'Tests Passed: {0}, '
         TestsFailed       = 'Failed: {0}, '
-        TestsSkipped      = 'Skipped: {0} '
-        TestsPending      = 'Pending: {0}, '
+        TestsSkipped      = 'Skipped: {0}, '
         TestsInconclusive = 'Inconclusive: {0}, '
         TestsNotRun       = 'NotRun: {0}'
     }
@@ -46,8 +45,6 @@ $script:ReportTheme = DATA {
         FailDetail       = 'Red'
         Skipped          = 'Yellow'
         SkippedTime      = 'DarkGray'
-        Pending          = 'Gray'
-        PendingTime      = 'DarkGray'
         NotRun           = 'Gray'
         NotRunTime       = 'DarkGray'
         Total            = 'Gray'
@@ -61,6 +58,7 @@ $script:ReportTheme = DATA {
         Discovery        = 'Magenta'
         Container        = 'Magenta'
         BlockFail        = 'Red'
+        Warning          = 'Yellow'
     }
 }
 
@@ -199,43 +197,12 @@ function Write-PesterStart {
         $Context
     )
     process {
-        # if (-not ( $Context.Show | Has-Flag 'All, Fails, Header')) {
-        #     return
-        # }
-
-        $OFS = $ReportStrings.MessageOfs
-
-        $hash = @{
-            Files        = [System.Collections.Generic.List[object]]@()
-            ScriptBlocks = 0
-        }
-
-        foreach ($c in $Context.Containers) {
-            switch ($c.Type) {
-                "File" { $null = $hash.Files.Add($c.Item.FullName) }
-                "ScriptBlock" { $null = $hash.ScriptBlocks++ }
-                Default { throw "$($c.Type) is not supported." }
-            }
-        }
-
         $moduleInfo = $MyInvocation.MyCommand.ScriptBlock.Module
         $moduleVersion = $moduleInfo.Version.ToString()
         if ($moduleInfo.PrivateData.PSData.Prerelease) {
             $moduleVersion += "-$($moduleInfo.PrivateData.PSData.Prerelease)"
         }
         $message = $ReportStrings.VersionMessage -f $moduleVersion
-
-        # todo write out filters that are applied
-        # if ($PesterState.TestNameFilter) {
-        #     $message += $ReportStrings.FilterMessage -f "$($PesterState.TestNameFilter)"
-        # }
-        # if ($PesterState.ScriptBlockFilter) {
-        #     $m = $(foreach ($m in $PesterState.ScriptBlockFilter) { "$($m.Path):$($m.Line)" }) -join ", "
-        #     $message += $ReportStrings.FilterMessage -f $m
-        # }
-        # if ($PesterState.TagFilter) {
-        #     $message += $ReportStrings.TagMessage -f "$($PesterState.TagFilter)"
-        # }
 
         Write-PesterHostMessage -ForegroundColor $ReportTheme.Discovery $message
     }
@@ -252,20 +219,20 @@ function ConvertTo-PesterResult {
     $testResult = @{
         Name           = $Name
         Time           = $time
-        FailureMessage = ""
-        StackTrace     = ""
+        FailureMessage = ''
+        StackTrace     = ''
         ErrorRecord    = $null
         Success        = $false
-        Result         = "Failed"
+        Result         = 'Failed'
     }
 
     if (-not $ErrorRecord) {
-        $testResult.Result = "Passed"
+        $testResult.Result = 'Passed'
         $testResult.Success = $true
         return $testResult
     }
 
-    if (@('PesterAssertionFailed', 'PesterTestSkipped', 'PesterTestInconclusive', 'PesterTestPending') -contains $ErrorRecord.FullyQualifiedErrorID) {
+    if (@('PesterAssertionFailed', 'PesterTestSkipped', 'PesterTestInconclusive') -contains $ErrorRecord.FullyQualifiedErrorID) {
         # we use TargetObject to pass structured information about the error.
         $details = $ErrorRecord.TargetObject
 
@@ -277,13 +244,10 @@ function ConvertTo-PesterResult {
         if (-not $Pester.Strict) {
             switch ($ErrorRecord.FullyQualifiedErrorID) {
                 PesterTestInconclusive {
-                    $testResult.Result = "Inconclusive"; break;
-                }
-                PesterTestPending {
-                    $testResult.Result = "Pending"; break;
+                    $testResult.Result = 'Inconclusive'; break;
                 }
                 PesterTestSkipped {
-                    $testResult.Result = "Skipped"; break;
+                    $testResult.Result = 'Skipped'; break;
                 }
             }
         }
@@ -305,9 +269,8 @@ function ConvertTo-PesterResult {
 function Write-PesterReport {
     param (
         [Parameter(mandatory = $true, valueFromPipeline = $true)]
-        $RunResult
+        [Pester.Run] $RunResult
     )
-    # if(-not ($PesterState.Show | Has-Flag Summary)) { return }
 
     Write-PesterHostMessage ($ReportStrings.Timing -f (Get-HumanTime ($RunResult.Duration))) -Foreground $ReportTheme.Foreground
 
@@ -339,18 +302,12 @@ function Write-PesterReport {
         $ReportTheme.Information
     }
 
-    # $Pending = if ($RunResult.PendingCount -gt 0) {
-    #     $ReportTheme.Pending
-    # }
-    # else {
-    #     $ReportTheme.Information
-    # }
-    # $Inconclusive = if ($RunResult.InconclusiveCount -gt 0) {
-    #     $ReportTheme.Inconclusive
-    # }
-    # else {
-    #     $ReportTheme.Information
-    # }
+    $Inconclusive = if ($RunResult.InconclusiveCount -gt 0) {
+        $ReportTheme.Inconclusive
+    }
+    else {
+        $ReportTheme.Information
+    }
 
     # Try {
     #     $PesterStatePassedScenariosCount = $PesterState.PassedScenarios.Count
@@ -374,34 +331,22 @@ function Write-PesterReport {
     Write-PesterHostMessage ($ReportStrings.TestsPassed -f $RunResult.PassedCount) -Foreground $Success -NoNewLine
     Write-PesterHostMessage ($ReportStrings.TestsFailed -f $RunResult.FailedCount) -Foreground $Failure -NoNewLine
     Write-PesterHostMessage ($ReportStrings.TestsSkipped -f $RunResult.SkippedCount) -Foreground $Skipped -NoNewLine
+    Write-PesterHostMessage ($ReportStrings.TestsInconclusive -f $RunResult.InconclusiveCount) -Foreground $Inconclusive -NoNewLine
     Write-PesterHostMessage ($ReportStrings.TestsTotal -f $RunResult.TotalCount) -Foreground $Total -NoNewLine
     Write-PesterHostMessage ($ReportStrings.TestsNotRun -f $RunResult.NotRunCount) -Foreground $NotRun
 
     if (0 -lt $RunResult.FailedBlocksCount) {
-        Write-PesterHostMessage ("BeforeAll \ AfterAll failed: {0}" -f $RunResult.FailedBlocksCount) -Foreground $ReportTheme.Fail
+        Write-PesterHostMessage ('BeforeAll \ AfterAll failed: {0}' -f $RunResult.FailedBlocksCount) -Foreground $ReportTheme.Fail
         Write-PesterHostMessage ($(foreach ($b in $RunResult.FailedBlocks) { "  - $($b.Path -join '.')" }) -join [Environment]::NewLine) -Foreground $ReportTheme.Fail
     }
 
     if (0 -lt $RunResult.FailedContainersCount) {
         $cs = foreach ($container in $RunResult.FailedContainers) {
-            $path = if ("File" -eq $container.Type) {
-                $container.Item.FullName
-            }
-            elseif ("ScriptBlock" -eq $container.Type) {
-                "<ScriptBlock>$($container.Item.File):$($container.Item.StartPosition.StartLine)"
-            }
-            else {
-                throw "Container type '$($container.Type)' is not supported."
-            }
-
-            "  - $path"
+            "  - $($container.Name)"
         }
-        Write-PesterHostMessage ("Container failed: {0}" -f $RunResult.FailedContainersCount) -Foreground $ReportTheme.Fail
+        Write-PesterHostMessage ('Container failed: {0}' -f $RunResult.FailedContainersCount) -Foreground $ReportTheme.Fail
         Write-PesterHostMessage ($cs -join [Environment]::NewLine) -Foreground $ReportTheme.Fail
     }
-    # & $SafeCommands['Write-Host'] ($ReportStrings.TestsPending -f $RunResult.PendingCount) -Foreground $Pending -NoNewLine
-    # & $SafeCommands['Write-Host'] ($ReportStrings.TestsInconclusive -f $RunResult.InconclusiveCount) -Foreground $Inconclusive
-    # }
 }
 
 function Write-CoverageReport {
@@ -542,7 +487,7 @@ function ConvertTo-FailureLines {
             if ($true) {
                 # no code
                 # non inlined scripts will have different paths just omit everything from the src folder
-                $path = [regex]::Escape(($PSScriptRoot | & $SafeCommands["Split-Path"]))
+                $path = [regex]::Escape(($PSScriptRoot | & $SafeCommands['Split-Path']))
                 [String]$isPesterFunction = "^at .*, .*$path.*: line [0-9]*$"
                 [String]$isShould = "^at (Should<End>|Invoke-Assertion), .*$path.*: line [0-9]*$"
             }
@@ -573,16 +518,6 @@ function ConvertTo-FailureLines {
     }
 }
 
-function ConvertTo-HumanTime {
-    param ([TimeSpan]$TimeSpan)
-    if ($TimeSpan.Ticks -lt [timespan]::TicksPerSecond) {
-        "$([int]($TimeSpan.TotalMilliseconds))ms"
-    }
-    else {
-        "$([math]::round($TimeSpan.TotalSeconds ,2))s"
-    }
-}
-
 function Get-WriteScreenPlugin ($Verbosity) {
     # add -FrameworkSetup Write-PesterStart $pester $Script and -FrameworkTeardown { $pester | Write-PesterReport }
     # The plugin is not imported when output None is specified so the usual level of output is Normal.
@@ -608,18 +543,8 @@ function Get-WriteScreenPlugin ($Verbosity) {
     $p.ContainerDiscoveryEnd = {
         param ($Context)
 
-        if ("Failed" -eq $Context.Block.Result) {
-            $path = if ("File" -eq $container.Type) {
-                $container.Item.FullName
-            }
-            elseif ("ScriptBlock" -eq $container.Type) {
-                "<ScriptBlock>$($container.Item.File):$($container.Item.StartPosition.StartLine)"
-            }
-            else {
-                throw "Container type '$($container.Type)' is not supported."
-            }
-
-            $errorHeader = "[-] Discovery in $($path) failed with:"
+        if ('Failed' -eq $Context.Block.Result) {
+            $errorHeader = "[-] Discovery in $($Context.BlockContainer) failed with:"
 
             $formatErrorParams = @{
                 Err                 = $Context.Block.ErrorRecord
@@ -648,7 +573,7 @@ function Get-WriteScreenPlugin ($Verbosity) {
         # . Found $count$(if(1 -eq $count) { " test" } else { " tests" })
 
         $discoveredTests = @(View-Flat -Block $Context.BlockContainers)
-        Write-PesterHostMessage -ForegroundColor $ReportTheme.Discovery "Discovery found $($discoveredTests.Count) tests in $(ConvertTo-HumanTime $Context.Duration)."
+        Write-PesterHostMessage -ForegroundColor $ReportTheme.Discovery "Discovery found $($discoveredTests.Count) tests in $(Get-HumanTime $Context.Duration)."
 
         if ($PesterPreference.Output.Verbosity.Value -in 'Detailed', 'Diagnostic') {
             $activeFilters = $Context.Filter.psobject.Properties | & $SafeCommands['Where-Object'] { $_.Value }
@@ -753,7 +678,7 @@ function Get-WriteScreenPlugin ($Verbosity) {
             $margin = $ReportStrings.Margin * ($level)
             $error_margin = $margin + $ReportStrings.Margin
             $out = $_test.ExpandedName
-            if (-not $_test.Skip -and $_test.ErrorRecord.FullyQualifiedErrorId -eq 'PesterTestSkipped') {
+            if (-not $_test.Skip -and @('PesterTestSkipped', 'PesterTestInconclusive') -contains $Result.ErrorRecord.FullyQualifiedErrorId) {
                 $skippedMessage = [String]$_Test.ErrorRecord
                 [String]$out += " $skippedMessage"
             }
@@ -829,21 +754,11 @@ function Get-WriteScreenPlugin ($Verbosity) {
                 break
             }
 
-            Pending {
-                if ($PesterPreference.Output.Verbosity.Value -in 'Detailed', 'Diagnostic') {
-                    $because = if ($_test.FailureMessage) { ", because $($_test.FailureMessage)" } else { $null }
-                    Write-PesterHostMessage -ForegroundColor $ReportTheme.Pending "$margin[?] $out" -NoNewLine
-                    Write-PesterHostMessage -ForegroundColor $ReportTheme.Pending ", is pending$because" -NoNewLine
-                    Write-PesterHostMessage -ForegroundColor $ReportTheme.PendingTime " $humanTime"
-                }
-                break
-            }
-
             Inconclusive {
                 if ($PesterPreference.Output.Verbosity.Value -in 'Detailed', 'Diagnostic') {
                     $because = if ($_test.FailureMessage) { ", because $($_test.FailureMessage)" } else { $null }
                     Write-PesterHostMessage -ForegroundColor $ReportTheme.Inconclusive "$margin[?] $out" -NoNewLine
-                    Write-PesterHostMessage -ForegroundColor $ReportTheme.Inconclusive ", is inconclusive$because" -NoNewLine
+                    Write-PesterHostMessage -ForegroundColor $ReportTheme.Inconclusive "$because" -NoNewLine
                     Write-PesterHostMessage -ForegroundColor $ReportTheme.InconclusiveTime " $humanTime"
                 }
 
@@ -1202,7 +1117,8 @@ function Resolve-OutputConfiguration ([PesterConfiguration]$PesterPreference) {
             # https://no-color.org/)
             $PesterPreference.Output.RenderMode = 'Plaintext'
         }
-        elseif (($supportsVT = $host.UI.psobject.Properties['SupportsVirtualTerminal']) -and $supportsVT.Value) {
+        # Null check $host.UI and its properties to avoid race condition when accessing them from multiple threads. https://github.com/pester/Pester/issues/2383
+        elseif ($null -ne $host.UI -and ($hostProperties = $host.UI.psobject.Properties) -and ($supportsVT = $hostProperties['SupportsVirtualTerminal']) -and $supportsVT.Value) {
             $PesterPreference.Output.RenderMode = 'Ansi'
         }
         else {

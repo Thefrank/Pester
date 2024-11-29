@@ -1,5 +1,5 @@
 ﻿
-function Should-BeNullOrEmpty($ActualValue, [switch] $Negate, [string] $Because) {
+function Should-BeNullOrEmptyAssertion($ActualValue, [switch] $Negate, [string] $Because) {
     <#
     .SYNOPSIS
     Checks values for null or empty (strings).
@@ -48,19 +48,26 @@ function Should-BeNullOrEmpty($ActualValue, [switch] $Negate, [string] $Because)
 
     $failureMessage = ''
 
-    if (-not $succeeded) {
-        if ($Negate) {
-            $failureMessage = NotShouldBeNullOrEmptyFailureMessage -Because $Because
-        }
-        else {
-            $valueToFormat = if ($singleValue) { $expandedValue } else { $ActualValue }
-            $failureMessage = ShouldBeNullOrEmptyFailureMessage -ActualValue $valueToFormat -Because $Because
-        }
+    if ($true -eq $succeeded) { return [Pester.ShouldResult]@{ Succeeded = $succeeded } }
+
+    if ($Negate) {
+        $failureMessage = NotShouldBeNullOrEmptyFailureMessage -Because $Because
+    }
+    else {
+        $valueToFormat = if ($singleValue) { $expandedValue } else { $ActualValue }
+        $failureMessage = ShouldBeNullOrEmptyFailureMessage -ActualValue $valueToFormat -Because $Because
     }
 
-    return [PSCustomObject] @{
+    $ExpectedValue = if ($Negate) { '$null or empty' } else { 'a value' }
+
+    return [Pester.ShouldResult] @{
         Succeeded      = $succeeded
         FailureMessage = $failureMessage
+        ExpectResult   = @{
+            Actual   = Format-Nicely $ActualValue
+            Expected = Format-Nicely $ExpectedValue
+            Because  = $Because
+        }
     }
 }
 
@@ -73,8 +80,8 @@ function NotShouldBeNullOrEmptyFailureMessage ($Because) {
 }
 
 & $script:SafeCommands['Add-ShouldOperator'] -Name BeNullOrEmpty `
-    -InternalName       Should-BeNullOrEmpty `
-    -Test               ${function:Should-BeNullOrEmpty} `
+    -InternalName       Should-BeNullOrEmptyAssertion `
+    -Test               ${function:Should-BeNullOrEmptyAssertion} `
     -SupportsArrayInput
 
 Set-ShouldOperatorHelpMessage -OperatorName BeNullOrEmpty `

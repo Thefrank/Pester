@@ -4,7 +4,7 @@
         [object[]] $CodeCoverage,
         [ScriptBlock] $Logger,
         [bool] $UseSingleHitBreakpoints = $true,
-        [bool] $UseBreakpoints = $true
+        [bool] $UseBreakpoints = $false
     )
 
     if ($null -ne $logger) {
@@ -151,6 +151,7 @@ function New-CoverageInfo {
     }
 }
 
+# TODO: Remove this and other code related to hashtable syntax?
 function Get-CoverageInfoFromDictionary {
     param ([System.Collections.IDictionary] $Dictionary)
 
@@ -166,6 +167,10 @@ function Get-CoverageInfoFromDictionary {
     $includeTests = Get-DictionaryValueFromFirstKeyFound -Dictionary $Dictionary -Key 'IncludeTests'
     $recursePaths = Get-DictionaryValueFromFirstKeyFound -Dictionary $Dictionary -Key 'RecursePaths'
 
+    # TODO: Implement or remove the IDictionary config logic from CodeCoverage
+    # Quick fix for https://github.com/pester/Pester/issues/2514 until CodeCoverage config logic is updated
+    if ($null -eq $includeTests) { $includeTests = $PesterPreference.CodeCoverage.ExcludeTests.Value -ne $true }
+
     $startLine = Convert-UnknownValueToInt -Value $startLine -DefaultValue 0
     $endLine = Convert-UnknownValueToInt -Value $endLine -DefaultValue 0
     [bool] $includeTests = Convert-UnknownValueToInt -Value $includeTests -DefaultValue 0
@@ -174,6 +179,7 @@ function Get-CoverageInfoFromDictionary {
     return New-CoverageInfo -Path $path -StartLine $startLine -EndLine $endLine -Class $class -Function $function -IncludeTests $includeTests -RecursePaths $recursePaths
 }
 
+# TODO: Remove or move til Utility?
 function Convert-UnknownValueToInt {
     param ([object] $Value, [int] $DefaultValue = 0)
 
@@ -205,7 +211,7 @@ function Resolve-CoverageInfo {
 
     $filePaths = Get-CodeCoverageFilePaths -Paths $resolvedPaths -IncludeTests $includeTests -RecursePaths $recursePaths
 
-    $params = @{
+    $commonParams = @{
         StartLine = $UnresolvedCoverageInfo.StartLine
         EndLine   = $UnresolvedCoverageInfo.EndLine
         Class     = $UnresolvedCoverageInfo.Class
@@ -213,46 +219,27 @@ function Resolve-CoverageInfo {
     }
 
     foreach ($filePath in $filePaths) {
-        $params['Path'] = $filePath
-        New-CoverageInfo @params
+        New-CoverageInfo @commonParams -Path $filePath
     }
 }
 
 function Get-CodeCoverageFilePaths {
     param (
-        [object]$Paths,
+        [string[]]$Paths,
         [bool]$IncludeTests,
         [bool]$RecursePaths
     )
 
     $testsPattern = "*$($PesterPreference.Run.TestExtension.Value)"
 
-    $filePaths = foreach ($path in $Paths) {
-        $item = & $SafeCommands['Get-Item'] -LiteralPath $path
-        if ($item -is [System.IO.FileInfo] -and ('.ps1', '.psm1') -contains $item.Extension -and ($IncludeTests -or $item.Name -notlike $testsPattern)) {
-            $item.FullName
+    [string[]] $filteredFiles = @(foreach ($file in (& $SafeCommands['Get-ChildItem'] -LiteralPath $Paths -File -Recurse:$RecursePaths)) {
+        if (('.ps1', '.psm1') -contains $file.Extension -and ($IncludeTests -or $file.Name -notlike $testsPattern)) {
+            $file.FullName
         }
-        elseif ($item -is [System.IO.DirectoryInfo]) {
-            $children = foreach ($i in & $SafeCommands['Get-ChildItem'] -LiteralPath $item) {
-                # if we recurse paths return both directories and files so they can be resolved in the
-                # recursive call to Get-CodeCoverageFilePaths, otherwise return just files
-                if ($RecursePaths) {
-                    $i.PSPath
-                }
-                elseif (-not $i.PSIsContainer) {
-                    $i.PSPath
-                }
-            }
-            Get-CodeCoverageFilePaths -Paths $children -IncludeTests $IncludeTests -RecursePaths $RecursePaths
-        }
-        elseif (-not $item.PsIsContainer) {
-            # todo: enable this warning for non wildcarded paths? otherwise it prints a ton of warnings for documentation and so on when using "folder/*" wildcard
-            # & $SafeCommands['Write-Warning'] "CodeCoverage path '$path' resolved to a non-PowerShell file '$($item.FullName)'; this path will not be part of the coverage report."
-        }
-    }
+    })
 
-    return $filePaths
-
+    $uniqueFiles = [System.Collections.Generic.HashSet[string]]::new($filteredFiles)
+    return $uniqueFiles
 }
 
 function Get-CoverageBreakpoints {
@@ -465,6 +452,14 @@ function IsIgnoredCommand {
         # For some reason, the closing expressions of do/while and do/until loops don't trigger their breakpoints.
         # To avoid useless clutter, we'll ignore those lines as well.
         return $true
+    }
+
+    if ($PSVersionTable.PSVersion.Major -ge 5) {
+        if ($Command -is [System.Management.Automation.Language.CommandExpressionAst] -and
+            $Command.Expression[0] -is [System.Management.Automation.Language.BaseCtorInvokeMemberExpressionAst]) {
+            # Calls to inherited "base(...)" constructor does not trigger breakpoint or tracer hit, ignore.
+            return $true
+        }
     }
 
     return $false
@@ -815,13 +810,12 @@ function Get-JaCoCoReportXml {
 
     $isGutters = "CoverageGutters" -eq $Format
 
-    if ($null -eq $CoverageReport -or ($pester.Show -eq [Pester.OutputTypes]::None) -or $CoverageReport.NumberOfCommandsAnalyzed -eq 0) {
+    if ($null -eq $CoverageReport -or $CoverageReport.NumberOfCommandsAnalyzed -eq 0) {
         return [string]::Empty
     }
 
-    $now = & $SafeCommands['Get-Date']
-    $nineteenSeventy = & $SafeCommands['Get-Date'] -Date "01/01/1970"
-    [long] $endTime = [math]::Floor((New-TimeSpan -start $nineteenSeventy -end $now).TotalMilliseconds)
+    # Report uses unix epoch time format (milliseconds since midnight 1/1/1970 UTC)
+    [long] $endTime = [System.DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     [long] $startTime = [math]::Floor($endTime - $TotalMilliseconds)
 
     $folderGroups = $CommandCoverage | & $SafeCommands["Group-Object"] -Property {
@@ -1043,6 +1037,224 @@ function Get-JaCoCoReportXml {
     return $xml
 }
 
+function Get-CoberturaReportXml {
+    param (
+        [parameter(Mandatory = $true)]
+        [object] $CoverageReport,
+        [parameter(Mandatory = $true)]
+        [long] $TotalMilliseconds
+    )
+
+    if ($null -eq $CoverageReport -or $CoverageReport.NumberOfCommandsAnalyzed -eq 0) {
+        return [string]::Empty
+    }
+
+    # Report uses unix epoch time format (milliseconds since midnight 1/1/1970 UTC)
+    [long] $endTime = [System.DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    [long] $startTime = [math]::Floor($endTime - $TotalMilliseconds)
+
+    $commonRoot = Get-CommonParentPath -Path $CoverageReport.AnalyzedFiles
+
+    $allLines = [System.Collections.Generic.List[object]]@()
+    $allLines.AddRange($CoverageReport.MissedCommands)
+    $allLines.AddRange($CoverageReport.HitCommands)
+    $packages = @{}
+    foreach ($command in $allLines) {
+        $package = & $SafeCommands["Split-Path"] $command.File -Parent
+        if (!$packages[$package]) {
+            $packages[$package] = @{
+                Classes = @{}
+            }
+        }
+
+        $class = $command.File
+        if (!$packages[$package].Classes[$class]) {
+            $packages[$package].Classes[$class] = @{
+                Methods = @{}
+                Lines   = @{}
+            }
+        }
+
+        if (!$packages[$package].Classes[$class].Lines[$command.Line]) {
+            $packages[$package].Classes[$class].Lines[$command.Line] = [ordered]@{ number = $command.Line ; hits = 0 }
+        }
+        $packages[$package].Classes[$class].Lines[$command.Line].hits += $command.HitCount
+
+        $method = $command.Function
+        if (!$method) {
+            continue
+        }
+
+        if (!$packages[$package].Classes[$class].Methods[$method]) {
+            $packages[$package].Classes[$class].Methods[$method] = @{}
+        }
+
+        if (!$packages[$package].Classes[$class].Methods[$method][$command.Line]) {
+            $packages[$package].Classes[$class].Methods[$method][$command.Line] = [ordered]@{ number = $command.Line ; hits = 0 }
+        }
+        $packages[$package].Classes[$class].Methods[$method][$command.Line].hits += $command.HitCount
+    }
+
+    $packages = foreach ($packageGroup in $packages.GetEnumerator()) {
+        $classGroups = $packageGroup.Value.Classes
+        $classes = foreach ($classGroup in $classGroups.GetEnumerator()) {
+            $methodGroups = $classGroup.Value.Methods
+            $methods = foreach ($methodGroup in $methodGroups.GetEnumerator()) {
+                $lines = ([object[]]$methodGroup.Value.Values) | New-LineNode
+                $coveredLines = foreach ($line in $lines) { if (0 -lt $line.attributes.hits) { $line } }
+
+                $method = [ordered]@{
+                    name         = 'method'
+                    attributes   = [ordered]@{
+                        name      = $methodGroup.Name
+                        signature = '()'
+                    }
+                    children     = [ordered]@{
+                        lines = $lines | & $SafeCommands["Sort-Object"] { [int]$_.attributes.number }
+                    }
+                    totalLines   = $lines.Length
+                    coveredLines = $coveredLines.Length
+                }
+
+                $method
+            }
+
+            $lines = ([object[]]$classGroup.Value.Lines.Values) | New-LineNode
+            $coveredLines = foreach ($line in $lines) { if (0 -lt $line.attributes.hits) { $line } }
+
+            $lineRate = Get-LineRate -CoveredLines $coveredLines.Length -TotalLines $lines.Length
+            $filename = $classGroup.Name.Substring($commonRoot.Length).Replace('\', '/').TrimStart('/')
+
+            $class = [ordered]@{
+                name         = 'class'
+                attributes   = [ordered]@{
+                    name          = (& $SafeCommands["Split-Path"] $classGroup.Name -Leaf)
+                    filename      = $filename
+                    'line-rate'   = $lineRate
+                    'branch-rate' = 1
+                }
+                children     = [ordered]@{
+                    methods = $methods | & $SafeCommands["Sort-Object"] { $_.attributes.name }
+                    lines   = $lines | & $SafeCommands["Sort-Object"] { [int]$_.attributes.number }
+                }
+                totalLines   = $lines.Length
+                coveredLines = $coveredLines.Length
+            }
+
+            $class
+        }
+
+        $totalLines = ($classes.totalLines | & $SafeCommands["Measure-Object"] -Sum).Sum
+        $coveredLines = ($classes.coveredLines | & $SafeCommands["Measure-Object"] -Sum).Sum
+        $lineRate = Get-LineRate -CoveredLines $coveredLines -TotalLines $totalLines
+        $packageName = $packageGroup.Name.Substring($commonRoot.Length).Replace('\', '/').TrimStart('/')
+
+        $package = [ordered]@{
+            name         = 'package'
+            attributes   = [ordered]@{
+                name          = $packageName
+                'line-rate'   = $lineRate
+                'branch-rate' = 0
+            }
+            children     = [ordered]@{
+                classes = $classes | & $SafeCommands["Sort-Object"] { $_.attributes.name }
+            }
+            totalLines   = $totalLines
+            coveredLines = $coveredLines
+        }
+
+        $package
+    }
+
+    $totalLines = ($packages.totalLines | & $SafeCommands["Measure-Object"] -Sum).Sum
+    $coveredLines = ($packages.coveredLines | & $SafeCommands["Measure-Object"] -Sum).Sum
+    $lineRate = Get-LineRate -CoveredLines $coveredLines -TotalLines $totalLines
+
+    $coverage = [ordered]@{
+        name       = 'coverage'
+        attributes = [ordered]@{
+            'lines-valid'      = $totalLines
+            'lines-covered'    = $coveredLines
+            'line-rate'        = $lineRate
+            'branches-valid'   = 0
+            'branches-covered' = 0
+            'branch-rate'      = 1
+            timestamp          = $startTime
+            version            = 0.1
+        }
+        children   = [ordered]@{
+            sources  = [ordered]@{
+                name  = 'source'
+                value = $commonRoot.Replace('\', '/')
+            }
+            packages = $packages | & $SafeCommands["Sort-Object"] { $_.attributes.name }
+        }
+    }
+
+    $xmlDeclaration = '<?xml version="1.0" ?>'
+    $docType = '<!DOCTYPE coverage SYSTEM "coverage-loose.dtd">'
+    $coverageXml = ConvertTo-XmlElement -Node $coverage
+    $document = "$xmlDeclaration`n$docType`n$($coverageXml.OuterXml)"
+
+    $document
+}
+
+function New-LineNode {
+    param(
+        [parameter(Mandatory = $true, ValueFromPipeline = $true)] [object] $LineObject
+    )
+
+    process {
+        [ordered]@{
+            name       = 'line'
+            attributes = $LineObject
+        }
+    }
+}
+
+function Get-LineRate {
+    param(
+        [parameter(Mandatory = $true)] [int] $CoveredLines,
+        [parameter(Mandatory = $true)] [int] $TotalLines
+    )
+
+    [double]$denominator = if ($TotalLines) { $TotalLines } else { 1 }
+
+    $CoveredLines / $denominator
+}
+
+function ConvertTo-XmlElement {
+    param(
+        [parameter(Mandatory = $true)] [object] $Node
+    )
+
+    $element = ([xml]"<$($Node.name)/>").DocumentElement
+    if ($node.attributes) {
+        $attributes = $node.attributes
+        foreach ($attr in $attributes.GetEnumerator()) {
+            $element.SetAttribute($attr.Name, $attr.Value)
+        }
+    }
+    if ($node.children) {
+        $children = $node.children
+        foreach ($child in $children.GetEnumerator()) {
+            $childElement = ([xml]"<$($child.Name)/>").DocumentElement
+            foreach ($value in $child.Value) {
+                $childXml = ConvertTo-XmlElement $value
+                $importedChildXml = $childElement.OwnerDocument.ImportNode($childXml, $true)
+                $null = $childElement.AppendChild($importedChildXml)
+            }
+            $importedChild = $element.OwnerDocument.ImportNode($childElement, $true)
+            $null = $element.AppendChild($importedChild)
+        }
+    }
+    if ($node.value) {
+        $element.InnerText = $node.value
+    }
+
+    $element
+}
+
 function Add-XmlElement {
     param (
         [parameter(Mandatory = $true)] [System.Xml.XmlNode] $Parent,
@@ -1051,12 +1263,21 @@ function Add-XmlElement {
     )
     $element = $Parent.AppendChild($Parent.OwnerDocument.CreateElement($Name))
     if ($Attributes) {
-        foreach ($key in $Attributes.Keys) {
-            $attribute = $element.Attributes.Append($Parent.OwnerDocument.CreateAttribute($key))
-            $attribute.Value = $Attributes.$key
-        }
+        Add-XmlAttribute -Element $element -Attributes $Attributes
     }
     return $element
+}
+
+function Add-XmlAttribute {
+    param(
+        [parameter(Mandatory = $true)] [System.Xml.XmlNode] $Element,
+        [parameter(Mandatory = $true)] [System.Collections.IDictionary] $Attributes
+    )
+
+    foreach ($key in $Attributes.Keys) {
+        $attribute = $Element.Attributes.Append($Element.OwnerDocument.CreateAttribute($key))
+        $attribute.Value = $Attributes.$key
+    }
 }
 
 function Add-JaCoCoCounter {
@@ -1122,9 +1343,18 @@ function Start-TraceScript ($Breakpoints) {
     }
 
     if (-not $registered) {
-        $patched = $true
-        [Pester.Tracing.Tracer]::Patch($PSVersionTable.PSVersion.Major, $ExecutionContext, $host.UI, $tracer)
-        Set-PSDebug -Trace 1
+
+        # detect if code coverage is enabled throuh Pester tracer, and in that case just add us as a second tracer
+        if (1 -eq $env:PESTER_CC_IN_CC -and [Pester.Tracing.Tracer]::ShouldRegisterTracer($tracer, <# overwrite: #> $false)) {
+            $patched = $false
+            $registered = $true
+            [Pester.Tracing.Tracer]::Register($tracer)
+        }
+        else {
+            $patched = $true
+            [Pester.Tracing.Tracer]::Patch($PSVersionTable.PSVersion.Major, $ExecutionContext, $host.UI, $tracer)
+            Set-PSDebug -Trace 1
+        }
     }
 
     # true if we patched powershell and have to unpatch it later,
@@ -1135,15 +1365,28 @@ function Start-TraceScript ($Breakpoints) {
 function Stop-TraceScript {
     param ([bool] $Patched)
 
-    # if profiler is imported and running and in that case just remove us as a second tracer
-    # to not disturb the profiling session
+    # if we patched powershell we need to unpatch it, if we did not patch it, then we need to unregister ourselves because we are the second tracer.
     if ($Patched) {
-        Set-PSDebug -Trace 0
+        $corruptionAutodetectionVariable = Set-PSDebug -Trace 0
         [Pester.Tracing.Tracer]::Unpatch()
     }
     else {
+        # Stop tracing so we don't record Unregister
+        $corruptionAutodetectionVariable = Set-PSDebug -Trace 0
+        # This variable name is used to detect if the tracer was broken, we cannot use comments because they are not part of the ast Extent.Text
+        # Assigning it here to null, because otherwise it gives warning about not being used.
+        $null = $corruptionAutodetectionVariable
+        # detect if profiler is imported, if yes, unregister us from Profiler (because we are profiling Pester)
         $profilerType = "Profiler.Tracer" -as [Type]
-        $profilerType::Unregister()
+        if ($null -ne $profilerType) {
+            $profilerType::Unregister()
+        }
+        elseif (1 -eq $env:PESTER_CC_IN_CC) {
+            # we are not profiling we are running code coverage in code coverage
+            [Pester.Tracing.Tracer]::Unregister()
+        }
+        # start tracing again so the other tracer can continue
+        Set-PSDebug -Trace 1
     }
 }
 

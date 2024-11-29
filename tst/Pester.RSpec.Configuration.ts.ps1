@@ -1,9 +1,10 @@
 ﻿param ([switch] $PassThru, [switch] $NoBuild)
 
-Get-Module Pester.Runtime, Pester.Utility, P, Pester, Axiom, Stack | Remove-Module
+Get-Module P, PTestHelpers, Pester, Axiom | Remove-Module
 
 Import-Module $PSScriptRoot\p.psm1 -DisableNameChecking
 Import-Module $PSScriptRoot\axiom\Axiom.psm1 -DisableNameChecking
+Import-Module $PSScriptRoot\PTestHelpers.psm1 -DisableNameChecking
 
 if (-not $NoBuild) { & "$PSScriptRoot\..\build.ps1" }
 Import-Module $PSScriptRoot\..\bin\Pester.psd1
@@ -12,33 +13,8 @@ $global:PesterPreference = @{
     Debug = @{
         ShowFullErrors         = $true
         WriteDebugMessages     = $false
-        WriteDebugMessagesFrom = "Mock"
+        WriteDebugMessagesFrom = 'Mock'
         ReturnRawResultObject  = $true
-    }
-}
-
-function Verify-PathEqual {
-    [CmdletBinding()]
-    param (
-        [Parameter(ValueFromPipeline = $true)]
-        $Actual,
-        [Parameter(Mandatory = $true, Position = 0)]
-        $Expected
-    )
-
-    if ([string]::IsNullOrEmpty($Expected)) {
-        throw "Expected is null or empty."
-    }
-
-    if ([string]::IsNullOrEmpty($Actual)) {
-        throw "Actual is null or empty."
-    }
-
-    $e = ($expected -replace "\\", '/').Trim('/')
-    $a = ($actual -replace "\\", '/').Trim('/')
-
-    if ($e -ne $a) {
-        throw "Expected path '$e' to be equal to '$a'."
     }
 }
 
@@ -77,6 +53,10 @@ i -PassThru:$PassThru {
 
         t "Run.SkipRemainingOnFailure is None" {
             [PesterConfiguration]::Default.Run.SkipRemainingOnFailure.Value | Verify-Equal "None"
+        }
+
+        t 'Run.FailOnNullOrEmptyForEach is $true' {
+            [PesterConfiguration]::Default.Run.FailOnNullOrEmptyForEach.Value | Verify-Equal $true
         }
 
         # Output configuration
@@ -157,6 +137,10 @@ i -PassThru:$PassThru {
         # Should configuration
         t "Should.ErrorAction is Stop" {
             [PesterConfiguration]::Default.Should.ErrorAction.Value | Verify-Equal 'Stop'
+        }
+
+        t "Should.DisableV5 is `$false" {
+            [PesterConfiguration]::Default.Should.DisableV5.Value | Verify-Equal $false
         }
 
         # Debug configuration
@@ -1164,7 +1148,7 @@ i -PassThru:$PassThru {
                     Throw       = $true
                 }
                 Output = @{
-                    CIFormat = 'None'
+                    CIFormat   = 'None'
                     CILogLevel = 'Something'
                 }
             }
@@ -1176,7 +1160,7 @@ i -PassThru:$PassThru {
     b 'Output.RenderMode' {
         t 'Output.RenderMode is Plaintext when set to Auto (default) and env:NO_COLOR is set' {
             $c = [PesterConfiguration] @{
-                Run    = @{
+                Run = @{
                     ScriptBlock = { }
                     PassThru    = $true
                 }
@@ -1249,7 +1233,7 @@ i -PassThru:$PassThru {
             $pesterPath = Get-Module Pester | Select-Object -ExpandProperty Path
             try {
                 $ps = [PowerShell]::Create()
-                $ps.AddCommand('Set-StrictMode').AddParameter('Version','Latest') > $null
+                $ps.AddCommand('Set-StrictMode').AddParameter('Version', 'Latest') > $null
                 $ps.AddStatement().AddScript("Import-Module '$pesterPath' -Force") > $null
                 $ps.AddStatement().AddScript('$c = [PesterConfiguration]@{Run = @{ScriptBlock={ describe "d1" { it "i1" { } } };PassThru=$true};Output=@{RenderMode="Auto"}}') > $null
                 $ps.AddStatement().AddScript('Invoke-Pester -Configuration $c') > $null
@@ -1267,7 +1251,7 @@ i -PassThru:$PassThru {
 
         t 'Each non-Auto option can be set and updated' {
             $c = [PesterConfiguration] @{
-                Run    = @{
+                Run = @{
                     ScriptBlock = { }
                     PassThru    = $true
                 }
@@ -1301,7 +1285,8 @@ i -PassThru:$PassThru {
             try {
                 Invoke-Pester -Configuration $c
                 $true | Verify-False # Should not get here
-            } catch {
+            }
+            catch {
                 $_.Exception.Message -match "Output.RenderMode must be .* it was 'Something'" | Verify-True
                 $failed = $true
             }
@@ -1345,6 +1330,43 @@ i -PassThru:$PassThru {
             }
 
             { Invoke-Pester -Configuration $c } | Verify-Throw
+        }
+    }
+
+    b "Should.DisableV5" {
+        t "Disabling V5 assertions makes Should -Be throw" {
+            $c = [PesterConfiguration]@{
+                Run    = @{
+                    ScriptBlock = { Describe 'a' { It 'b' { 1 | Should -Be 1 } } }
+                    PassThru    = $true
+                }
+                Should = @{
+                    DisableV5 = $true
+                }
+                Output = @{
+                    CIFormat = 'None'
+                }
+            }
+
+            $r = Invoke-Pester -Configuration $c
+            $err = $r.Containers.Blocks.Tests.ErrorRecord
+
+            $err.Exception.Message | Verify-Equal 'Pester Should -Be syntax is disabled. Use Should-Be (without space), or enable it by setting: $PesterPreference.Should.DisableV5 = $false'
+        }
+
+        t "Enabling V5 assertions makes Should -Be pass" {
+            $c = [PesterConfiguration]@{
+                Run    = @{
+                    ScriptBlock = { Describe 'a' { It 'b' { 1 | Should -Be 1 } } }
+                    PassThru    = $true
+                }
+                Should = @{
+                    DisableV5 = $false
+                }
+            }
+
+            $r = Invoke-Pester -Configuration $c
+            $r.Result | Verify-Equal "Passed"
         }
     }
 }

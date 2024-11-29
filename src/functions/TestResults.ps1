@@ -20,7 +20,7 @@
 
 function Export-PesterResult {
     param (
-        $Result,
+        [Pester.Run] $Result,
         [string] $Path,
         [string] $Format
     )
@@ -63,7 +63,7 @@ function Export-NUnitReport {
     -Passthru or by using the Run.PassThru configuration-option.
 
     .PARAMETER Path
-    The path where the XML-report should  to the ou the XML report as string.
+    The path where the XML-report should be saved.
 
     .PARAMETER Format
     Specifies the NUnit-schema to be used.
@@ -85,7 +85,7 @@ function Export-NUnitReport {
     #>
     param (
         [parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        $Result,
+        [Pester.Run] $Result,
 
         [parameter(Mandatory = $true)]
         [String] $Path,
@@ -116,7 +116,7 @@ function Export-JUnitReport {
     -Passthru or by using the Run.PassThru configuration-option.
 
     .PARAMETER Path
-    The path where the XML-report should  to the ou the XML report as string.
+    The path where the XML-report should be saved.
 
     .EXAMPLE
     ```powershell
@@ -135,7 +135,7 @@ function Export-JUnitReport {
     #>
     param (
         [parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        $Result,
+        [Pester.Run] $Result,
 
         [parameter(Mandatory = $true)]
         [String] $Path
@@ -147,7 +147,7 @@ function Export-JUnitReport {
 function Export-XmlReport {
     param (
         [parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        $Result,
+        [Pester.Run] $Result,
 
         [parameter(Mandatory = $true)]
         [String] $Path,
@@ -270,9 +270,10 @@ function ConvertTo-NUnitReport {
     .LINK
     https://pester.dev/docs/commands/Invoke-Pester
     #>
+    [OutputType([xml], [string])]
     param (
-        [parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        $Result,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [Pester.Run] $Result,
         [Switch] $AsString,
 
         [ValidateSet('NUnit2.5', 'NUnit3')]
@@ -287,7 +288,7 @@ function ConvertTo-NUnitReport {
     $stringWriter = $null
     $xmlWriter = $null
     try {
-        $stringWriter = & $SafeCommands['New-Object'] IO.StringWriter
+        $stringWriter = [IO.StringWriter]::new()
         $xmlWriter = [Xml.XmlWriter]::Create($stringWriter, $settings)
 
         switch ($Format) {
@@ -360,9 +361,10 @@ function ConvertTo-JUnitReport {
     .LINK
     https://pester.dev/docs/commands/Invoke-Pester
     #>
+    [OutputType([xml], [string])]
     param (
-        [parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        $Result,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [Pester.Run] $Result,
         [Switch] $AsString
     )
 
@@ -374,7 +376,7 @@ function ConvertTo-JUnitReport {
     $stringWriter = $null
     $xmlWriter = $null
     try {
-        $stringWriter = & $SafeCommands['New-Object'] IO.StringWriter
+        $stringWriter = [IO.StringWriter]::new()
         $xmlWriter = [Xml.XmlWriter]::Create($stringWriter, $settings)
 
         Write-JUnitReport -XmlWriter $xmlWriter -Result $Result

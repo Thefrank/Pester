@@ -1,5 +1,5 @@
 #Be
-function Should-Be ($ActualValue, $ExpectedValue, [switch] $Negate, [string] $Because) {
+function Should-BeAssertion ($ActualValue, $ExpectedValue, [switch] $Negate, [string] $Because) {
     <#
     .SYNOPSIS
     Compares one object with another for equality
@@ -26,18 +26,23 @@ function Should-Be ($ActualValue, $ExpectedValue, [switch] $Negate, [string] $Be
 
     $failureMessage = ''
 
-    if (-not $succeeded) {
-        if ($Negate) {
-            $failureMessage = NotShouldBeFailureMessage -ActualValue $ActualValue -Expected $ExpectedValue -Because $Because
-        }
-        else {
-            $failureMessage = ShouldBeFailureMessage -ActualValue $ActualValue -Expected $ExpectedValue -Because $Because
-        }
+    if ($true -eq $succeeded) { return [Pester.ShouldResult]@{Succeeded = $succeeded } }
+
+    if ($Negate) {
+        $failureMessage = NotShouldBeFailureMessage -ActualValue $ActualValue -Expected $ExpectedValue -Because $Because
+    }
+    else {
+        $failureMessage = ShouldBeFailureMessage -ActualValue $ActualValue -Expected $ExpectedValue -Because $Because
     }
 
-    return [PSCustomObject] @{
+    return [Pester.ShouldResult] @{
         Succeeded      = $succeeded
         FailureMessage = $failureMessage
+        ExpectResult   = @{
+            Actual   = Format-Nicely $ActualValue
+            Expected = Format-Nicely $ExpectedValue
+            Because  = $Because
+        }
     }
 }
 
@@ -64,8 +69,8 @@ function NotShouldBeFailureMessage($ActualValue, $ExpectedValue, $Because) {
 }
 
 & $script:SafeCommands['Add-ShouldOperator'] -Name Be `
-    -InternalName       Should-Be `
-    -Test               ${function:Should-Be} `
+    -InternalName       Should-BeAssertion `
+    -Test               ${function:Should-BeAssertion} `
     -Alias              'EQ' `
     -SupportsArrayInput
 
@@ -73,7 +78,7 @@ Set-ShouldOperatorHelpMessage -OperatorName Be `
     -HelpMessage 'Compares one object with another for equality and throws if the two objects are not the same.'
 
 #BeExactly
-function Should-BeExactly($ActualValue, $ExpectedValue, $Because) {
+function Should-BeAssertionExactly($ActualValue, $ExpectedValue, $Because) {
     <#
     .SYNOPSIS
     Compares one object with another for equality and throws if the
@@ -99,18 +104,23 @@ function Should-BeExactly($ActualValue, $ExpectedValue, $Because) {
 
     $failureMessage = ''
 
-    if (-not $succeeded) {
-        if ($Negate) {
-            $failureMessage = NotShouldBeExactlyFailureMessage -ActualValue $ActualValue -ExpectedValue $ExpectedValue -Because $Because
-        }
-        else {
-            $failureMessage = ShouldBeExactlyFailureMessage -ActualValue $ActualValue -ExpectedValue $ExpectedValue -Because $Because
-        }
+    if ($true -eq $succeeded) { return [Pester.ShouldResult]@{Succeeded = $succeeded } }
+
+    if ($Negate) {
+        $failureMessage = NotShouldBeExactlyFailureMessage -ActualValue $ActualValue -ExpectedValue $ExpectedValue -Because $Because
+    }
+    else {
+        $failureMessage = ShouldBeExactlyFailureMessage -ActualValue $ActualValue -ExpectedValue $ExpectedValue -Because $Because
     }
 
-    return [PSCustomObject] @{
+    return [Pester.ShouldResult] @{
         Succeeded      = $succeeded
         FailureMessage = $failureMessage
+        ExpectResult   = @{
+            Actual   = Format-Nicely $ActualValue
+            Expected = Format-Nicely $ExpectedValue
+            Because  = $Because
+        }
     }
 }
 
@@ -137,8 +147,8 @@ function NotShouldBeExactlyFailureMessage($ActualValue, $ExpectedValue, $Because
 }
 
 & $script:SafeCommands['Add-ShouldOperator'] -Name BeExactly `
-    -InternalName       Should-BeExactly `
-    -Test               ${function:Should-BeExactly} `
+    -InternalName       Should-BeAssertionExactly `
+    -Test               ${function:Should-BeAssertionExactly} `
     -Alias              'CEQ' `
     -SupportsArrayInput
 

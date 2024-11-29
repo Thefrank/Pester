@@ -1,4 +1,4 @@
-﻿function Should-Throw {
+﻿function Should-ThrowAssertion {
     <#
     .SYNOPSIS
     Checks if an exception was thrown. Enclose input in a script block.
@@ -70,17 +70,14 @@
         # this is for Should -Not -Throw. Once *any* exception was thrown we should fail the assertion
         # there is no point in filtering the exception, because there should be none
         $succeeded = -not $actualExceptionWasThrown
-        if (-not $succeeded) {
-            $failureMessage = "Expected no exception to be thrown,$(Format-Because $Because) but an exception `"$actualExceptionMessage`" was thrown $actualExceptionLine."
-            return [PSCustomObject] @{
-                Succeeded      = $succeeded
-                FailureMessage = $failureMessage
-            }
+        if ($true -eq $succeeded) {
+            return [Pester.ShouldResult]@{Succeeded = $succeeded }
         }
-        else {
-            return [PSCustomObject] @{
-                Succeeded = $true
-            }
+
+        $failureMessage = "Expected no exception to be thrown,$(Format-Because $Because) but an exception `"$actualExceptionMessage`" was thrown $actualExceptionLine."
+        return [Pester.ShouldResult] @{
+            Succeeded      = $succeeded
+            FailureMessage = $failureMessage
         }
     }
 
@@ -101,7 +98,8 @@
 
     $filterOnMessage = -not [string]::IsNullOrWhitespace($ExpectedMessage)
     if ($filterOnMessage) {
-        $filters += "message like $(Format-Nicely $ExpectedMessage)"
+        $unescapedExpectedMessage = [System.Management.Automation.WildcardPattern]::Unescape($ExpectedMessage)
+        $filters += "message like $(Format-Nicely $unescapedExpectedMessage)"
         if ($actualExceptionWasThrown -and (-not (Get-DoValuesMatch $actualExceptionMessage $ExpectedMessage))) {
             $buts += "the message was $(Format-Nicely $actualExceptionMessage)"
         }
@@ -124,13 +122,26 @@
         $but = Join-And $buts
         $failureMessage = "Expected an exception$(if($filter) { " with $filter" }) to be thrown,$(Format-Because $Because) but $but. $actualExceptionLine".Trim()
 
-        return [PSCustomObject] @{
+        $ActualValue = $actualExceptionMessage
+        $ExpectedValue = if ($filterOnExceptionType) {
+            "type $(Format-Nicely $ExceptionType)"
+        }
+        else {
+            'any exception'
+        }
+
+        return [Pester.ShouldResult] @{
             Succeeded      = $false
             FailureMessage = $failureMessage
+            ExpectResult   = @{
+                Actual   = Format-Nicely $ActualValue
+                Expected = Format-Nicely $ExpectedValue
+                Because  = $Because
+            }
         }
     }
 
-    $result = [PSCustomObject] @{
+    $result = [Pester.ShouldResult] @{
         Succeeded = $true
     }
 
@@ -165,8 +176,8 @@ function NotShouldThrowFailureMessage {
 }
 
 & $script:SafeCommands['Add-ShouldOperator'] -Name Throw `
-    -InternalName Should-Throw `
-    -Test         ${function:Should-Throw}
+    -InternalName Should-ThrowAssertion `
+    -Test         ${function:Should-ThrowAssertion}
 
 Set-ShouldOperatorHelpMessage -OperatorName Throw `
     -HelpMessage 'Checks if an exception was thrown. Enclose input in a scriptblock.'

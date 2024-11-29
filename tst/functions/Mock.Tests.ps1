@@ -2366,14 +2366,24 @@ Describe 'Naming conflicts in mocked functions' {
 }
 
 Describe 'Passing unbound script blocks as mocks' {
-    It 'Does not produce an error' {
+    BeforeAll {
         function TestMe {
             'Original'
         }
+    }
+    It 'Does not produce an error' {
         $scriptBlock = [scriptblock]::Create('"Mocked"')
 
         { Mock TestMe $scriptBlock } | Should -Not -Throw
         TestMe | Should -Be Mocked
+    }
+
+    It 'Should not execute in Pester internal state' {
+        $filter = [scriptblock]::Create('if ("pester" -eq $ExecutionContext.SessionState.Module) { throw "executed parameter filter in internal state" } else { $true }')
+        $scriptBlock = [scriptblock]::Create('if ("pester" -eq $ExecutionContext.SessionState.Module) { throw "executed mock in internal state" } else { "Mocked" }')
+
+        { Mock -CommandName TestMe -ParameterFilter $filter -MockWith $scriptBlock } | Should -Not -Throw
+        TestMe -SomeParam | Should -Be Mocked
     }
 }
 
@@ -2994,26 +3004,6 @@ Describe "Mocks can be defined outside of BeforeAll" {
 
     It "Finds the mock" {
         a | Should -Be "mock"
-    }
-}
-
-Describe "Assert-MockCalled is available as a wrapper over Should -Invoke for backwards compatibility" {
-
-    It  "Count calls" {
-        function f () { "real" }
-        Mock f { "mock" }
-        f
-        Assert-MockCalled -CommandName f -Exactly 1
-    }
-}
-
-Describe "Assert-VerifiableMock is available as a wrapper over Should -InvokeVerifiable for backwards compatibility" {
-
-    It  "Verify calls" {
-        function f () { "real" }
-        Mock f { "mock" } -Verifiable
-        f
-        Assert-VerifiableMock
     }
 }
 

@@ -1,4 +1,4 @@
-﻿function Should-HaveCount($ActualValue, [int] $ExpectedValue, [switch] $Negate, [string] $Because) {
+﻿function Should-HaveCountAssertion($ActualValue, [int] $ExpectedValue, [switch] $Negate, [string] $Because) {
     <#
     .SYNOPSIS
     Asserts that a collection has the expected amount of items.
@@ -40,9 +40,17 @@
             else {
                 "but got an empty collection."
             }
-            return [PSCustomObject] @{
+
+            $ExpectedResult = if ($expectingEmpty) { 'a non-empty collection' } else { "a collection with size different from $(Format-Nicely $ExpectedValue)" }
+
+            return [Pester.ShouldResult] @{
                 Succeeded      = $false
                 FailureMessage = "$expect,$(Format-Because $Because) $but"
+                ExpectResult   = @{
+                    Actual   = Format-Nicely $ActualValue
+                    Expected = Format-Nicely $ExpectedResult
+                    Because  = $Because
+                }
             }
         }
         else {
@@ -58,21 +66,29 @@
             else {
                 "but got an empty collection."
             }
-            return [PSCustomObject] @{
+
+            $ExpectedResult = if ($expectingEmpty) { "an empty collection" } else { "a collection with size $(Format-Nicely $ExpectedValue)" }
+
+            return [Pester.ShouldResult] @{
                 Succeeded      = $false
                 FailureMessage = "$expect,$(Format-Because $Because) $but"
+                ExpectResult   = @{
+                    Actual   = Format-Nicely $ActualValue
+                    Expected = Format-Nicely $ExpectedResult
+                    Because  = $Because
+                }
             }
         }
     }
 
-    return [PSCustomObject] @{
+    return [Pester.ShouldResult] @{
         Succeeded = $true
     }
 }
 
 & $script:SafeCommands['Add-ShouldOperator'] -Name HaveCount `
-    -InternalName Should-HaveCount `
-    -Test         ${function:Should-HaveCount} `
+    -InternalName Should-HaveCountAssertion `
+    -Test         ${function:Should-HaveCountAssertion} `
     -SupportsArrayInput
 
 Set-ShouldOperatorHelpMessage -OperatorName HaveCount `

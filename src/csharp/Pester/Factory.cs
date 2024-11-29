@@ -1,8 +1,8 @@
-using System.Management.Automation;
-using System.Collections.Generic;
 using System;
-using System.Text;
+using System.Collections.Generic;
 using System.IO;
+using System.Management.Automation;
+using System.Text;
 
 namespace Pester
 {
@@ -25,21 +25,16 @@ namespace Pester
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         }
 
-        public static RuntimeDefinedParameterDictionary CreateRuntimeDefinedParameterDictionary() {
-            return new System.Management.Automation.RuntimeDefinedParameterDictionary();
-        }
-
         public static List<object> CreateCollection()
         {
             return new List<object>();
         }
-
-        public static ErrorRecord CreateShouldErrorRecord(string message, string file, string line, string lineText, bool terminating)
+        public static ErrorRecord CreateShouldErrorRecord(string message, string file, string line, string lineText, bool terminating, object shouldResult = null)
         {
-            return CreateErrorRecord("PesterAssertionFailed", message, file, line, lineText, terminating);
+            return CreateErrorRecord("PesterAssertionFailed", message, file, line, lineText, terminating, shouldResult);
         }
 
-        public static ErrorRecord CreateErrorRecord(string errorId, string message, string file, string line, string lineText, bool terminating)
+        public static ErrorRecord CreateErrorRecord(string errorId, string message, string file, string line, string lineText, bool terminating, object shouldResult = null)
         {
             var exception = new Exception(message);
             // we use ErrorRecord.TargetObject to pass structured information about the error to a reporting system.
@@ -51,6 +46,11 @@ namespace Pester
                 ["LineText"] = lineText,
                 ["Terminating"] = terminating,
             };
+
+            if (shouldResult is not null)
+            {
+                targetObject["ShouldResult"] = shouldResult;
+            }
             return new ErrorRecord(exception, errorId, ErrorCategory.InvalidResult, targetObject);
         }
 

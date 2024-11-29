@@ -1,5 +1,5 @@
 ﻿
-function Should-BeOfType($ActualValue, $ExpectedType, [switch] $Negate, [string]$Because) {
+function Should-BeOfTypeAssertion($ActualValue, $ExpectedType, [switch] $Negate, [string]$Because) {
     <#
     .SYNOPSIS
     Asserts that the actual value should be an object of a specified type
@@ -51,25 +51,33 @@ function Should-BeOfType($ActualValue, $ExpectedType, [switch] $Negate, [string]
         $actualType = $null
     }
 
-    if (-not $succeded) {
-        if ($Negate) {
-            $failureMessage = "Expected the value to not have type $(Format-Nicely $ExpectedType) or any of its subtypes,$(Format-Because $Because) but got $(Format-Nicely $ActualValue) with type $(Format-Nicely $actualType)."
-        }
-        else {
-            $failureMessage = "Expected the value to have type $(Format-Nicely $ExpectedType) or any of its subtypes,$(Format-Because $Because) but got $(Format-Nicely $ActualValue) with type $(Format-Nicely $actualType)."
-        }
+    if ($true -eq $succeeded) { return [Pester.ShouldResult]@{Succeeded = $succeeded } }
+
+
+    if ($Negate) {
+        $failureMessage = "Expected the value to not have type $(Format-Nicely $ExpectedType) or any of its subtypes,$(Format-Because $Because) but got $(Format-Nicely $ActualValue) with type $(Format-Nicely $actualType)."
+    }
+    else {
+        $failureMessage = "Expected the value to have type $(Format-Nicely $ExpectedType) or any of its subtypes,$(Format-Because $Because) but got $(Format-Nicely $ActualValue) with type $(Format-Nicely $actualType)."
     }
 
-    return [PSCustomObject] @{
+    $ExpectedValue = if ($Negate) { "not $(Format-Nicely $ExpectedType) or any of its subtypes" } else { "a $(Format-Nicely $ExpectedType) or any of its subtypes" }
+
+    return [Pester.ShouldResult] @{
         Succeeded      = $succeded
         FailureMessage = $failureMessage
+        ExpectResult   = @{
+            Actual   = Format-Nicely $ActualValue
+            Expected = Format-Nicely $ExpectedValue
+            Because  = $Because
+        }
     }
 }
 
 
 & $script:SafeCommands['Add-ShouldOperator'] -Name BeOfType `
-    -InternalName Should-BeOfType `
-    -Test         ${function:Should-BeOfType} `
+    -InternalName Should-BeOfTypeAssertion `
+    -Test         ${function:Should-BeOfTypeAssertion} `
     -Alias        'HaveType'
 
 Set-ShouldOperatorHelpMessage -OperatorName BeOfType `

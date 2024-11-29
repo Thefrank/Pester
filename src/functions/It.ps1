@@ -15,7 +15,7 @@
     In addition to using your own logic to test expectations and throw exceptions,
     you may also use Pester's Should command to perform assertions in plain language.
 
-    You can intentionally mark It block result as inconclusive by using Set-TestInconclusive
+    You can intentionally mark It block result as inconclusive by using Set-ItResult -Inconclusive
     command as the first tested statement in the It block.
 
     .PARAMETER Name
@@ -27,16 +27,13 @@
     AAA pattern (Arrange-Act-Assert), this typically holds the
     Assert.
 
-    .PARAMETER Pending
-    Use this parameter to explicitly mark the test as work-in-progress/not implemented/pending when you
-    need to distinguish a test that fails because it is not finished yet from a tests
-    that fail as a result of changes being made in the code base. An empty test, that is a
-    test that contains nothing except whitespace or comments is marked as Pending by default.
-
     .PARAMETER Skip
     Use this parameter to explicitly mark the test to be skipped. This is preferable to temporarily
-    commenting out a test, because the test remains listed in the output. Use the Strict parameter
-    of Invoke-Pester to force all skipped tests to fail.
+    commenting out a test, because the test remains listed in the output.
+
+    .PARAMETER AllowNullOrEmptyForEach
+    Allows empty or null values for -ForEach when Run.FailOnNullOrEmptyForEach is enabled.
+    This might be excepted in certain scenarios like using external data.
 
     .PARAMETER ForEach
     (Formerly called TestCases.) Optional array of hashtable (or any IDictionary) objects.
@@ -134,11 +131,9 @@
 
         [String[]] $Tag,
 
-        [Parameter(ParameterSetName = 'Pending')]
-        [Switch] $Pending,
-
         [Parameter(ParameterSetName = 'Skip')]
-        [Switch] $Skip
+        [Switch] $Skip,
+        [Switch] $AllowNullOrEmptyForEach
 
         # [Parameter(ParameterSetName = 'Skip')]
         # [String] $SkipBecause,
@@ -147,12 +142,6 @@
     )
 
     $Focus = $false
-    if ($PSBoundParameters.ContainsKey('Pending')) {
-        $PSBoundParameters.Remove('Pending')
-
-        $Skip = $Pending
-        # $SkipBecause = "This test is pending."
-    }
 
     if ($null -eq $Test) {
         if ($Name.Contains("`n")) {
@@ -163,13 +152,18 @@
         }
     }
 
+    Assert-BoundScriptBlockInput -ScriptBlock $Test
+
     if ($PSBoundParameters.ContainsKey('ForEach')) {
-        if ($null -ne $ForEach -and 0 -lt @($ForEach).Count) {
-            New-ParametrizedTest -Name $Name -ScriptBlock $Test -StartLine $MyInvocation.ScriptLineNumber -Data $ForEach -Tag $Tag -Focus:$Focus -Skip:$Skip
+        if ($null -eq $ForEach -or 0 -eq @($ForEach).Count) {
+            if ($PesterPreference.Run.FailOnNullOrEmptyForEach.Value -and -not $AllowNullOrEmptyForEach) {
+                throw [System.ArgumentException]::new('Value can not be null or empty array. If this is expected, use -AllowNullOrEmptyForEach', 'ForEach')
+            }
+            # @() or $null is provided and allowed, do nothing
+            return
         }
-        else {
-            # @() or $null is provided do nothing
-        }
+
+        New-ParametrizedTest -Name $Name -ScriptBlock $Test -StartLine $MyInvocation.ScriptLineNumber -StartColumn $MyInvocation.OffsetInLine -Data $ForEach -Tag $Tag -Focus:$Focus -Skip:$Skip
     }
     else {
         New-Test -Name $Name -ScriptBlock $Test -StartLine $MyInvocation.ScriptLineNumber -Tag $Tag -Focus:$Focus -Skip:$Skip
